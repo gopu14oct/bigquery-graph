@@ -34,17 +34,20 @@ from docparse.elements import (
     Coordinates,
     Element,
     ElementMetadata,
+    FigureCaption,
     Footer,
     Header,
+    Image,
     ListItem,
     PageBreak,
     Table,
     Title,
+    UncategorizedText,
 )
 from docparse.partition.common import FileLike, base_metadata, classify_text, finalize, read_bytes
 from docparse.partition.html import rows_to_html, rows_to_text
 from docparse.partition.ocr import ocr_page, page_needs_ocr, tesseract_available
-from docparse.text_type import BULLETS_RE, ORDERED_BULLET_RE, is_page_number
+from docparse.text_type import BULLETS_RE, EMAIL_IN_TEXT_RE, URL_RE, ORDERED_BULLET_RE, is_page_number
 
 
 @dataclass
@@ -323,6 +326,10 @@ def merge_continuations(elements: list[Element]) -> list[Element]:
         if isinstance(el, (Header, Footer, PageBreak)):
             out.append(el)
             continue
+        if getattr(el, "_rotated", False) or getattr(prev, "_rotated", False):
+            out.append(el)
+            prev = el
+            continue
         if (prev is not None and prev.category in _FLOW_TYPES and el.category in _FLOW_TYPES
                 and el.text[:1].islower() and not prev.text.rstrip().endswith(_SENT_END)):
             pc, ec = prev.metadata.coordinates, el.metadata.coordinates
@@ -337,6 +344,86 @@ def merge_continuations(elements: list[Element]) -> list[Element]:
         out.append(el)
         prev = el
     return out
+
+
+def _vertical_runs(page) -> list[tuple[tuple, str]]:
+    """Rebuild rotated text from individual glyphs.
+
+    Glyphs are grouped into runs sharing an x position, then ordered along the run:
+    bottom-to-top when the glyph matrix says the text is turned counter-clockwise
+    (b > 0), else top-to-bottom. Spaces are inserted where the along-run gap exceeds
+    15% of the font size.
+    """
+    chars = [c for c in page.chars if not c.get("upright", True) and c["text"].strip()]
+    runs: list[list[dict]] = []
+    for c in sorted(chars, key=lambda c: (round(c["x0"]), c["top"])):
+        if runs and abs(runs[-1][-1]["x0"] - c["x0"]) < 3 and c["top"] - runs[-1][-1]["bottom"] < 20:
+            runs[-1].append(c)
+        else:
+            runs.append([c])
+    out = []
+    for r in runs:
+        ccw = sum(1 for c in r if c.get("matrix") and c["matrix"][1] > 0) > len(r) / 2
+        r.sort(key=lambda c: c["top"], reverse=ccw)
+        parts = [r[0]["text"]]
+        for prev, c in zip(r, r[1:]):
+            gap = (prev["top"] - c["bottom"]) if ccw else (c["top"] - prev["bottom"])
+            parts.append((" " if gap > 0.15 * float(c.get("size", 10)) else "") + c["text"])
+        text = clean_extra_whitespace(clean_ligatures(_fix_cids("".join(parts))))
+        if text:
+            out.append(((min(c["x0"] for c in r), min(c["top"] for c in r), max(c["x1"] for c in r),
+                         max(c["bottom"] for c in r)), text))
+    return out
+
+
+CAPTION_RE = re.compile(r"^(?:fig\.?|figure|abb\.?|abbildung|table|tab\.|tabelle|chart|exhibit|plate)\s*[\dIVX]+[a-z]?\s*[.:|\u2013\u2014-]", re.I)
+
+
+def _page_images(page, min_side: float = 40.0) -> list[tuple]:
+    """Bounding boxes of embedded images large enough to be figures (not rules/logos dots)."""
+    out = []
+    for im in page.images:
+        x0, top, x1, bottom = im["x0"], im["top"], im["x1"], im["bottom"]
+        if x1 - x0 >= min_side and bottom - top >= min_side:
+            box = (max(0, x0), max(0, top), min(float(page.width), x1), min(float(page.height), bottom))
+            if box not in out:
+                out.append(box)
+    return out
+
+
+def link_captions(elements: list[Element], max_gap: float = 72.0) -> None:
+    """Point each FigureCaption's parent_id at the nearest image on the same page
+    (vertically adjacent, horizontally overlapping)."""
+    images = [e for e in elements if isinstance(e, Image) and e.metadata.coordinates is not None]
+    for cap in elements:
+        if not isinstance(cap, FigureCaption) or cap.metadata.coordinates is None:
+            continue
+        (cx0, ctop), (_, cbot), (cx1, _), _ = cap.metadata.coordinates.points
+        best = None
+        for im in images:
+            if im.metadata.page_number != cap.metadata.page_number:
+                continue
+            (ix0, itop), (_, ibot), (ix1, _), _ = im.metadata.coordinates.points
+            if min(cx1, ix1) - max(cx0, ix0) <= 0:
+                continue
+            gap = ctop - ibot if ctop >= ibot else itop - cbot
+            if -2 <= gap <= max_gap and (best is None or gap < best[0]):
+                best = (gap, im)
+        if best is not None:
+            cap.metadata.parent_id = best[1].id
+
+
+def repair_pdf(data: bytes) -> bytes:
+    """Re-write a PDF with pypdf (lenient parser), keeping only the pages."""
+    from pypdf import PdfReader, PdfWriter
+
+    reader = PdfReader(io.BytesIO(data), strict=False)
+    writer = PdfWriter()
+    for page in reader.pages:
+        writer.add_page(page)
+    out = io.BytesIO()
+    writer.write(out)
+    return out.getvalue()
 
 
 def _norm_furniture(text: str) -> str:
@@ -378,7 +465,15 @@ def partition_pdf(
 
     pages: list[dict] = []
     any_ocr = False
-    with pdfplumber.open(io.BytesIO(data)) as pdf:
+    try:
+        pdf_ctx = pdfplumber.open(io.BytesIO(data))
+        pdf_ctx.pages  # noqa: B018 - forces the page tree to be parsed now
+    except Exception:
+        # Malformed files (broken trailer/Info dict, bad xref): rebuild with pypdf,
+        # which is more forgiving, dropping the document-info dictionary.
+        data = repair_pdf(data)
+        pdf_ctx = pdfplumber.open(io.BytesIO(data))
+    with pdf_ctx as pdf:
         info_mod = (pdf.metadata or {}).get("ModDate")
         for pno, page in enumerate(pdf.pages, start=1):
             tables = []
@@ -388,11 +483,16 @@ def partition_pdf(
                     rows = [r for r in rows if any(r)]
                     if rows and len(rows[0]) > 1:
                         tables.append((t.bbox, rows))
-            words = page.extract_words(extra_attrs=["size", "fontname"], keep_blank_chars=False, use_text_flow=False)
+            any_ocr_page = False
+            # A gap wider than 15% of the font size separates words. A fixed tolerance
+            # (pdfplumber's default 3pt) glues words in tightly-set justified text.
+            words = page.extract_words(extra_attrs=["size", "fontname"], keep_blank_chars=False, use_text_flow=False,
+                                       x_tolerance=3, x_tolerance_ratio=0.15)
             if ocr != "never" and (ocr == "always" or page_needs_ocr(page, words)) and tesseract_available():
                 words, ocr_tables = ocr_page(page, lang=ocr_languages)
                 tables = ocr_tables if infer_table_structure else []
                 any_ocr = True
+                any_ocr_page = True
 
             def in_table(w):
                 return any(x0 - 1 <= w["x0"] and w["x1"] <= x1 + 1 and top - 1 <= w["top"] and w["bottom"] <= bottom + 1
@@ -400,8 +500,16 @@ def partition_pdf(
 
             words = [dict(w, text=clean_ligatures(_fix_cids(w["text"]))) for w in words if not in_table(w)]
             words = [w for w in words if w["text"].strip()]
+            # Rotated text (arXiv side stamps, rotated table headers, axis labels) would
+            # otherwise become one-character "lines"; keep it out of the main flow and
+            # emit each vertical run as a single element.
+            vertical = [w for w in words if not w.get("upright", True)]
+            words = [w for w in words if w.get("upright", True)]
             blocks = lines_to_blocks(words_to_lines(words))
-            pages.append({"no": pno, "w": float(page.width), "h": float(page.height), "blocks": blocks, "tables": tables})
+            pages.append({"no": pno, "w": float(page.width), "h": float(page.height), "blocks": blocks, "tables": tables,
+                          "vertical": _vertical_runs(page) if vertical else [],
+                          "images": [] if any_ocr_page else _page_images(page)})
+            page.close()  # release pdfminer's cached layout objects: keeps memory flat on long documents
     if base.last_modified is None and isinstance(info_mod, str):
         base.last_modified = info_mod
 
@@ -417,6 +525,8 @@ def partition_pdf(
         text = b.text
         n = len(text.split())
         if not text or n > 20 or text.endswith(".") or _starts_item(text):
+            return False
+        if URL_RE.search(text) or EMAIL_IN_TEXT_RE.search(text):
             return False
         if b.size >= body_size * 1.15:
             return True
@@ -482,6 +592,9 @@ def partition_pdf(
                 m = md(bbox); m.category_depth = level_of[round(b.size * 2) / 2]
                 items.append((b.top, b.x0, Title(text, m)))
                 continue
+            if CAPTION_RE.match(text):
+                items.append((b.top, b.x0, FigureCaption(text, md(bbox))))
+                continue
             el = classify_text(text, md(bbox))
             if el is None:
                 continue
@@ -489,11 +602,19 @@ def partition_pdf(
                 el.metadata.category_depth = _list_depth(b, pg["blocks"])
             items.append((b.top, b.x0, el))
 
+        for bbox in pg.get("images", []):
+            items.append((bbox[1], bbox[0], Image("", md(bbox))))
+        for bbox, text in pg.get("vertical", []):
+            vel = UncategorizedText(text, md(bbox))
+            vel._rotated = True  # type: ignore[attr-defined]
+            items.append((bbox[1], bbox[0], vel))
         ordered = [e for _, _, e in items]
         elements.extend(ordered)
         if pno < len(pages):
             pb = PageBreak("", base.copy()); pb.metadata.page_number = pno
             elements.append(pb)
     elements = merge_continuations(elements)
-    return finalize(elements, base, languages, include_page_breaks, unique_element_ids)
+    elements = finalize(elements, base, languages, include_page_breaks, unique_element_ids)
+    link_captions(elements)
+    return elements
 

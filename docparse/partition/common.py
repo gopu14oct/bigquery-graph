@@ -13,6 +13,7 @@ from docparse.elements import (
     Element,
     ElementMetadata,
     EmailAddress,
+    Image,
     ListItem,
     NarrativeText,
     PageBreak,
@@ -174,7 +175,7 @@ def finalize(
     """Merge base metadata, drop empties, assign stable ids and hierarchy."""
     out: list[Element] = []
     for el in elements:
-        if not isinstance(el, PageBreak) and not el.text.strip():
+        if not isinstance(el, (PageBreak, Image)) and not el.text.strip():
             continue
         if isinstance(el, PageBreak) and not include_page_breaks:
             continue

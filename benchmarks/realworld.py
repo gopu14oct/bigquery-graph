@@ -220,7 +220,7 @@ def report(out: str, parsers: list[str], md_path: str | None) -> None:
         scn = [m["word_f1"] for _, i, m in mine if i["kind"] == "scanned"]
         peak = max((m["peak_mb"] or 0) for _, _, m in mine) if mine else 0
         lines.append(f"| {parser} | {len(ok)}/{len(mine)} | {pages} | {secs:.0f} | {secs / max(1, pages):.3f} | "
-                     f"{dig[len(dig) // 2]:.3f} | {sum(scn) / max(1, len(scn)):.3f} | {peak:.0f} |")
+                     f"{(dig[len(dig) // 2] if dig else 0):.3f} | {sum(scn) / max(1, len(scn)):.3f} | {peak:.0f} |")
     text = "\n".join(lines)
     print(text)
     if md_path:
