@@ -40,3 +40,23 @@ None of these documents was used during development. The one ICDAR file used ear
 - All numbers are reported, including those where docparse loses.
 - 95% bootstrap confidence intervals (1,000 resamples over documents, seed 7) for the headline metrics.
 - Any document a parser crashes or times out on scores 0 for that parser. It is not dropped.
+
+## Amendment 1 (before any parser was run)
+
+Written after corpus selection and before either parser had run on any held-out file.
+
+1. **H2 had no eligible document in pdf.js.** All 30 tagged multi-page pdf.js files are fuzzed or deliberately
+   broken, so no answer key could be built. Under the same rule (tagged, ≥ 2 pages, ≥ 20 tag blocks), the source
+   is widened to every PDF in these third-party test corpora:
+   - pdfplumber `tests/pdfs`
+   - PyMuPDF `tests`
+   - Apache PDFBox `pdfbox/src/test/resources`
+   - the pdfminer.six, borb, tabula-py, pypdf, pikepdf and ocrmypdf sdists
+   - py-pdf/sample-files
+   - unstructured `example-docs`
+
+   Any file whose SHA-256 matches a document used earlier is excluded. Result: **14 documents**, listed in
+   `h2/manifest.json`.
+2. **"No text layer"** (used to choose unstructured's `ocr_only`) means `pdffonts` lists no fonts. It no longer
+   means "pdftotext finds < 20 words": pdf.js contains many tiny test files that have a text layer but almost no
+   words, and calling those scans would be wrong.
