@@ -9,7 +9,7 @@ from docparse.elements import Element, elements_from_dicts, elements_to_dicts
 
 
 # ------------------------------------------------------------------ JSON
-def elements_to_json(elements: Iterable[Element], filename: Optional[str] = None, indent: int = 2) -> str:
+def elements_to_json(elements: Iterable[Element], filename: Optional[str] = None, indent: int = 4) -> str:
     s = json.dumps(elements_to_dicts(elements), indent=indent, ensure_ascii=False)
     if filename:
         with open(filename, "w", encoding="utf-8") as f:
@@ -117,3 +117,16 @@ def load_to_bigquery(
     )
     job = client.load_table_from_json(elements_to_bigquery_rows(elements), table_id, job_config=job_config)
     return job.result()
+
+
+# ------------------------------------------------------------------ unstructured-compatible names
+def convert_to_dict(elements: Iterable[Element]) -> list[dict[str, Any]]:
+    return elements_to_dicts(elements)
+
+
+def dict_to_elements(dicts: Iterable[dict[str, Any]]) -> list[Element]:
+    return elements_from_dicts(dicts)
+
+
+def convert_to_dataframe(elements: Iterable[Element]):
+    return elements_to_dataframe(elements)

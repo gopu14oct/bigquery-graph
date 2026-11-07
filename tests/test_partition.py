@@ -85,7 +85,7 @@ def test_partition_html():
     assert pip_item.metadata.category_depth == 1 and pip_item.metadata.parent_id == install.id
     assert els[7].metadata.text_as_html == "<table><tr><td>Key</td><td>Value</td></tr><tr><td>a</td><td>1</td></tr></table>"
     assert els[8].text == "code  here"
-    assert els[0].metadata.languages == ["en"]
+    assert els[0].metadata.languages == ["eng"]
     assert "var x" not in " ".join(e.text for e in els)
 
 
@@ -149,7 +149,7 @@ def test_partition_epub(epub_file):
     els = partition(filename=epub_file)
     assert cats(els) == ["Title", "NarrativeText", "Title", "NarrativeText"]
     assert [e.metadata.page_number for e in els] == [1, 1, 2, 2]
-    assert els[0].metadata.languages == ["en"]
+    assert els[0].metadata.languages == ["eng"]
 
 
 def test_partition_email(eml_file):
@@ -224,3 +224,25 @@ def test_bigquery_rows():
     para = rows[2]
     assert json.loads(para["metadata"])["link_urls"] == ["https://e.com"]
     assert [r["sequence"] for r in rows] == list(range(len(rows)))
+
+
+def test_partition_scanned_pdf_ocr(pdf_file, tmp_path):
+    """Rasterise the fixture PDF and parse it via OCR: same structure must come back."""
+    import shutil
+
+    if shutil.which("tesseract") is None:
+        pytest.skip("tesseract not installed")
+    import pdfplumber
+
+    with pdfplumber.open(pdf_file) as pdf:
+        imgs = [p.to_image(resolution=200).original.convert("RGB") for p in pdf.pages]
+    scanned = tmp_path / "scanned.pdf"
+    imgs[0].save(scanned, save_all=True, append_images=imgs[1:], resolution=200)
+    els = partition(filename=str(scanned))
+    title = by_text(els, "A Study of Parsing")
+    assert title.category == "Title" and title.metadata.category_depth == 0
+    assert by_text(els, "Introduction").metadata.parent_id == title.id
+    assert {e.category for e in els if e.text == "Journal of Examples"} == {"Header"}
+    table = next(e for e in els if e.category == "Table")
+    assert "<td>alpha</td>" in table.metadata.text_as_html
+    assert [e.text for e in els if e.category == "ListItem"] == ["first bullet point", "second bullet point"]

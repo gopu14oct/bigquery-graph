@@ -119,15 +119,30 @@ WHERE s.type = 'Title' AND s.text = 'Revenue'
 RETURN p.type, p.text;
 ```
 
-## 5. Limitations compared with Unstructured's hosted and `hi_res` pipeline
+## 5. Drop-in compatibility with unstructured
 
-- **No OCR or vision layout model.** Scanned PDFs and images produce no text. You could add an OCR step
-  (for example Tesseract) as another partitioner.
-- PDF tables are detected only when they have ruling lines. Tables made from whitespace alignment come out as text.
+- The output schema is the same: `type` / `element_id` / `text` / `metadata`, with unstructured's element type names and metadata keys.
+- `languages` defaults to `["eng"]`.
+- `partition_pdf(strategy="fast" | "ocr_only" | "hi_res" | "auto")` accepts unstructured's strategy names.
+- `convert_to_dict`, `dict_to_elements` and `elements_to_json` keep unstructured's names.
+- JSON round-trips in both directions; `tests/test_compat.py` checks this against the real package.
+
+| unstructured | docparse |
+|---|---|
+| `from unstructured.partition.auto import partition` | `from docparse import partition` |
+| `from unstructured.chunking.title import chunk_by_title` | `from docparse import chunk_by_title` |
+| `from unstructured.staging.base import convert_to_dict, elements_to_json` | `from docparse import convert_to_dict, elements_to_json` |
+
+Benchmark results are in [`benchmarks/README.md`](../benchmarks/README.md), including the caveats on what they do and don't show.
+
+## 6. Limitations compared with Unstructured's hosted and `hi_res` pipeline
+
+- **OCR is Tesseract only, with no vision layout model.** Scanned pages are OCR'd automatically when `tesseract` is installed. Heading levels on scans are the weakest metric (about 0.5).
+- PDF tables are detected only when they have ruling lines, both in the vector layer and in scanned images. Tables made from whitespace alignment come out as text.
 - Legacy binary formats (`.doc`, `.ppt`, `.xls`, `.msg`) are not supported. Convert them with LibreOffice first.
 - Language detection is not done. Pass `languages=[...]`, or rely on HTML `lang` and EPUB `dc:language`.
 
-## 6. Tests
+## 7. Tests
 
 ```bash
 pip install -e ".[test]" && pytest

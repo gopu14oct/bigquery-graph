@@ -84,6 +84,7 @@ class _DocxStyles:
         self.names: dict[str, str] = {}
         self.based_on: dict[str, str] = {}
         self.outline: dict[str, int] = {}
+        self.list_level: dict[str, int] = {}
         root = _xml(z, "word/styles.xml")
         if root is None:
             return
@@ -94,6 +95,9 @@ class _DocxStyles:
             b = st.find(W + "basedOn")
             if b is not None:
                 self.based_on[sid] = b.get(W + "val")
+            if st.find(f"{W}pPr/{W}numPr") is not None:
+                il = st.find(f"{W}pPr/{W}numPr/{W}ilvl")
+                self.list_level[sid] = int(il.get(W + "val")) if il is not None else 0
             ol = st.find(f"{W}pPr/{W}outlineLvl")
             if ol is not None:
                 self.outline[sid] = int(ol.get(W + "val"))
@@ -117,7 +121,24 @@ class _DocxStyles:
 
     def is_list(self, sid: Optional[str]) -> bool:
         name = self.names.get(sid or "", "").lower()
-        return "list" in name and "table" not in name
+        return ("list" in name and "table" not in name) or self.style_list_level(sid) is not None
+
+    def style_list_level(self, sid: Optional[str]) -> Optional[int]:
+        """List level defined by the style itself (e.g. "List Bullet 2" -> 1)."""
+        seen = set()
+        while sid and sid not in seen:
+            seen.add(sid)
+            if sid in self.list_level:
+                lvl = self.list_level[sid]
+                m = re.search(r"list (?:bullet|number|continue|paragraph)?\s*(\d)$", self.names.get(sid, "").lower())
+                if lvl == 0 and m:
+                    return int(m.group(1)) - 1
+                return lvl
+            m = re.search(r"^list (?:bullet|number|continue)\s*(\d)$", self.names.get(sid, "").lower())
+            if m:
+                return int(m.group(1)) - 1
+            sid = self.based_on.get(sid)
+        return None
 
 
 class _DocxReader:
@@ -235,7 +256,7 @@ class _DocxReader:
                 md.category_depth = level
                 self.elements.append(Title(text, md))
             elif num_level is not None or self.styles.is_list(style):
-                md.category_depth = num_level or 0
+                md.category_depth = num_level if num_level is not None else (self.styles.style_list_level(style) or 0)
                 self.elements.append(ListItem(text, md))
             else:
                 el = classify_text(text, md)

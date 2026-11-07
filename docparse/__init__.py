@@ -10,6 +10,9 @@ from docparse.elements import *  # noqa: F401,F403
 from docparse.filetype import FileType, detect_filetype
 from docparse.partition import *  # noqa: F401,F403
 from docparse.staging import (
+    convert_to_dataframe,
+    convert_to_dict,
+    dict_to_elements,
     elements_from_json,
     elements_to_bigquery_rows,
     elements_to_dataframe,

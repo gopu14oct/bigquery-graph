@@ -92,7 +92,8 @@ def base_metadata(
         md.file_directory = directory or None
     if last_modified is None and filename and os.path.exists(filename):
         ts = os.path.getmtime(filename)
-        last_modified = _dt.datetime.fromtimestamp(ts, tz=_dt.timezone.utc).isoformat()
+        # same format as unstructured: local time, second precision, no offset
+        last_modified = _dt.datetime.fromtimestamp(ts).strftime("%Y-%m-%dT%H:%M:%S")
     md.last_modified = last_modified
     return md
 
@@ -143,6 +144,26 @@ def assign_hierarchy(elements: list[Element]) -> None:
             md.parent_id = title_stack[-1][1].id
 
 
+ISO639_1_TO_3 = {
+    "en": "eng", "fr": "fra", "de": "deu", "es": "spa", "it": "ita", "pt": "por", "nl": "nld", "ru": "rus",
+    "zh": "zho", "ja": "jpn", "ko": "kor", "ar": "ara", "hi": "hin", "sv": "swe", "da": "dan", "no": "nor",
+    "fi": "fin", "pl": "pol", "tr": "tur", "cs": "ces", "el": "ell", "he": "heb", "uk": "ukr", "vi": "vie",
+}
+
+
+def normalize_languages(languages: Optional[list[str]]) -> list[str]:
+    """ISO 639-3 codes like unstructured (``"en"``/``"en-US"`` -> ``"eng"``); default ``["eng"]``."""
+    if not languages:
+        return ["eng"]
+    out = []
+    for lang in languages:
+        code = lang.split("-")[0].split("_")[0].lower()
+        code = ISO639_1_TO_3.get(code, code)
+        if code not in out:
+            out.append(code)
+    return out
+
+
 def finalize(
     elements: list[Element],
     base: ElementMetadata,
@@ -161,8 +182,8 @@ def finalize(
         for field in ("filename", "file_directory", "filetype", "last_modified", "url"):
             if getattr(md, field) is None:
                 setattr(md, field, getattr(base, field))
-        if languages and md.languages is None:
-            md.languages = list(languages)
+        if md.languages is None:
+            md.languages = normalize_languages(languages)
         out.append(el)
 
     # Ids must exist before parent links are computed; the hash depends on position
