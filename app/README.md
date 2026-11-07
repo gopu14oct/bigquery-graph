@@ -52,3 +52,25 @@ put it behind IAP or drop that flag for private use.
 | POST | `/api/docs/{id}/reviews` | `{element_id, verdict, corrected_type, note}` |
 | POST | `/api/docs/{id}/compare` | run unstructured (needs `UNSTRUCTURED_PYTHON`) |
 | GET | `/api/docs/{id}/export?fmt=` | `json`, `jsonl`, `csv`, `markdown`, `bigquery` or `reviews` |
+
+## Browser-only version (no server)
+
+`app/browser/` is the same app with docparse running **inside the browser**: Python via Pyodide in a Web Worker,
+and pdf.js for page images. Documents never leave the device and are stored in IndexedDB.
+
+```bash
+python app/browser/build.py --out dist/    # downloads Pyodide, pdf.js and pure-Python wheels, bundles docparse
+```
+
+Serve `dist/` from any static host, or publish it as a claude.ai artifact. The first load downloads about 24 MB,
+which the browser then caches.
+
+Compared with the server version, it lacks:
+- **OCR:** no Tesseract, so scanned pages and photos produce no text.
+- **The Unstructured comparison.**
+- **Encrypted PDFs:** AES-encrypted PDFs are not supported, because the native `cryptography` package is replaced by a stub.
+
+Exports are copy-to-clipboard, because the artifact sandbox blocks downloads.
+
+The artifact host serves binary archives (`.zip`, `.whl`) with HTTP 415. The build therefore stores them
+base64-encoded as `.txt`, and the worker decodes them in memory.

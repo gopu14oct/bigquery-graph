@@ -12,9 +12,7 @@ Environment:
 from __future__ import annotations
 
 import collections
-import csv
 import datetime as dt
-import io
 import json
 import os
 import re
@@ -32,8 +30,9 @@ from fastapi.responses import FileResponse, JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
+from app import exporters
 from app.validate import validate
-from docparse import chunk, elements_from_dicts, elements_to_bigquery_rows, partition
+from docparse import chunk, elements_from_dicts, partition
 from docparse.filetype import detect_filetype
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -392,67 +391,13 @@ def export(doc_id: str, fmt: str = "json"):
     res = read_json(os.path.join(ddir(doc_id), "result.json"))
     if not res:
         raise HTTPException(409, "document not parsed yet")
-    els = res["elements"]
-    base = os.path.splitext(m["filename"])[0]
-    if fmt == "json":
-        body, mt, ext = json.dumps(els, indent=2, ensure_ascii=False), "application/json", "json"
-    elif fmt == "jsonl":
-        body, mt, ext = "\n".join(json.dumps(e, ensure_ascii=False) for e in els) + "\n", "application/x-ndjson", "jsonl"
-    elif fmt == "bigquery":
-        rows = elements_to_bigquery_rows(elements_from_dicts(els))
-        body, mt, ext = "\n".join(json.dumps(r, ensure_ascii=False) for r in rows) + "\n", "application/x-ndjson", "bq.jsonl"
-    elif fmt == "csv":
-        buf = io.StringIO()
-        w = csv.writer(buf)
-        w.writerow(["element_id", "type", "page", "depth", "parent_id", "text"])
-        for e in els:
-            md = e["metadata"]
-            w.writerow([e["element_id"], e["type"], md.get("page_number", ""), md.get("category_depth", ""),
-                        md.get("parent_id", ""), e["text"]])
-        body, mt, ext = buf.getvalue(), "text/csv", "csv"
-    elif fmt == "markdown":
-        body, mt, ext = to_markdown(els), "text/markdown", "md"
-    elif fmt == "reviews":
-        reviews = read_json(os.path.join(ddir(doc_id), "reviews.json"), {})
-        rows = []
-        for e in els:
-            r = reviews.get(e["element_id"])
-            if r:
-                rows.append({"element_id": e["element_id"], "page": e["metadata"].get("page_number"),
-                             "predicted_type": e["type"], "predicted_text": e["text"], **r})
-        body, mt, ext = json.dumps({"document": m["filename"], "reviews": rows}, indent=2, ensure_ascii=False), "application/json", "reviews.json"
-    else:
+    if fmt not in exporters.FORMATS:
         raise HTTPException(400, "unknown format")
+    reviews = read_json(os.path.join(ddir(doc_id), "reviews.json"), {})
+    body = exporters.render(res["elements"], fmt, reviews, m["filename"])
+    mt, ext = exporters.FORMATS[fmt]
+    base = os.path.splitext(m["filename"])[0]
     return Response(body, media_type=mt, headers={"Content-Disposition": f'attachment; filename="{base}.{ext}"'})
-
-
-def to_markdown(els: list[dict]) -> str:
-    out = []
-    for e in els:
-        t, md = e["type"], e["metadata"]
-        if t in ("Header", "Footer", "PageBreak"):
-            continue
-        if t == "Title":
-            out.append("#" * min(6, (md.get("category_depth") or 0) + 1) + " " + e["text"])
-        elif t == "ListItem":
-            out.append("  " * (md.get("category_depth") or 0) + "- " + e["text"])
-        elif t in ("Table", "TableChunk") and md.get("text_as_html"):
-            rows = re.findall(r"<tr>(.*?)</tr>", md["text_as_html"])
-            grid = [[c.replace("|", "\\|") for c in re.findall(r"<td>(.*?)</td>", r)] for r in rows]
-            if grid:
-                out.append("| " + " | ".join(grid[0]) + " |")
-                out.append("|" + "---|" * len(grid[0]))
-                out += ["| " + " | ".join(r) + " |" for r in grid[1:]]
-        elif t == "CodeSnippet":
-            out.append("```\n" + e["text"] + "\n```")
-        elif t == "Image":
-            out.append("*[image]*")
-        elif t == "FigureCaption":
-            out.append(f"*{e['text']}*")
-        else:
-            out.append(e["text"])
-        out.append("")
-    return "\n".join(out)
 
 
 @app.get("/healthz")

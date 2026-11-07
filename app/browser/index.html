@@ -1,0 +1,754 @@
+<title>docparse Studio</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Instrument+Sans:wght@400;500;600;700&family=JetBrains+Mono:wght@400;600&display=swap">
+<style>
+/* Layout: a phone-first single column with a sticky top bar and a bottom tab bar; on wide screens the tabs sit under the top bar. */
+:root {
+  --bg: #f5f6fa; --surface: #ffffff; --surface-2: #eef0f6; --border: #dde1ea;
+  --text: #151821; --muted: #5f6676; --accent: #4f4fd9; --accent-2: #0f8f8f; --on-accent: #ffffff;
+  --pass: #17894f; --warn: #b8730a; --fail: #c73b3b; --info: #3f6fc9;
+  --t-Title: #4f4fd9; --t-NarrativeText: #23875c; --t-ListItem: #b8730a; --t-Table: #c2410c; --t-TableChunk: #c2410c;
+  --t-Header: #7c8290; --t-Footer: #7c8290; --t-Image: #a8318f; --t-FigureCaption: #8a3fd1; --t-CodeSnippet: #0e7490;
+  --t-UncategorizedText: #646b78; --t-Text: #5b6577; --t-Address: #0b7f99; --t-EmailAddress: #0b7f99; --t-Formula: #b0193a;
+  --t-CompositeElement: #4338ca; --t-PageBreak: #94a3b8;
+  --shadow: 0 1px 2px rgba(20,24,40,.06), 0 4px 14px rgba(20,24,40,.06);
+  --font: "Instrument Sans", ui-sans-serif, -apple-system, "Segoe UI", Roboto, sans-serif;
+  --mono: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
+  --radius: 16px; --tabbar-h: 64px;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #0e1015; --surface: #161922; --surface-2: #1d212c; --border: #2a2f3c;
+    --text: #e7e9f0; --muted: #9aa1b2; --accent: #8e8eff; --accent-2: #33cfc1; --on-accent: #0e1015;
+    --pass: #4ade80; --warn: #fbbf24; --fail: #f87171; --info: #7aa7ff;
+    --t-Title: #8e8eff; --t-NarrativeText: #4ade80; --t-ListItem: #fbbf24; --t-Table: #fb923c; --t-TableChunk: #fb923c;
+    --t-Header: #9aa1b2; --t-Footer: #9aa1b2; --t-Image: #f472b6; --t-FigureCaption: #c084fc; --t-CodeSnippet: #22d3ee;
+    --t-UncategorizedText: #a1a1aa; --t-Text: #94a3b8; --t-Address: #38bdf8; --t-EmailAddress: #38bdf8; --t-Formula: #fb7185;
+    --t-CompositeElement: #a5b4fc; --t-PageBreak: #64748b;
+    --shadow: 0 1px 2px rgba(0,0,0,.4), 0 6px 22px rgba(0,0,0,.35);
+    color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #0e1015; --surface: #161922; --surface-2: #1d212c; --border: #2a2f3c;
+  --text: #e7e9f0; --muted: #9aa1b2; --accent: #8e8eff; --accent-2: #33cfc1; --on-accent: #0e1015;
+  --pass: #4ade80; --warn: #fbbf24; --fail: #f87171; --info: #7aa7ff;
+  --t-Title: #8e8eff; --t-NarrativeText: #4ade80; --t-ListItem: #fbbf24; --t-Table: #fb923c; --t-TableChunk: #fb923c;
+  --t-Header: #9aa1b2; --t-Footer: #9aa1b2; --t-Image: #f472b6; --t-FigureCaption: #c084fc; --t-CodeSnippet: #22d3ee;
+  --t-UncategorizedText: #a1a1aa; --t-Text: #94a3b8; --t-Address: #38bdf8; --t-EmailAddress: #38bdf8; --t-Formula: #fb7185;
+  --t-CompositeElement: #a5b4fc; --t-PageBreak: #64748b;
+  --shadow: 0 1px 2px rgba(0,0,0,.4), 0 6px 22px rgba(0,0,0,.35);
+  color-scheme: dark;
+}
+* { box-sizing: border-box; }
+[hidden] { display: none !important; }
+body { background: var(--bg); color: var(--text); font: 15px/1.5 var(--font); -webkit-font-smoothing: antialiased;
+  padding-bottom: calc(var(--tabbar-h) + env(safe-area-inset-bottom, 0px)); }
+body::before { content: ""; position: fixed; inset: 0 0 auto; height: env(safe-area-inset-top, 0px); z-index: 10; background: var(--bg); }
+svg { width: 20px; height: 20px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; flex: none; }
+button, select, input, textarea { font: inherit; color: inherit; }
+h1, h2, h3 { margin: 0; line-height: 1.2; text-wrap: balance; }
+.muted { color: var(--muted); }
+.mono { font-family: var(--mono); font-size: 12.5px; }
+:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+.topbar { position: sticky; top: env(safe-area-inset-top, 0px); z-index: 20; display: flex; align-items: center; gap: 8px;
+  padding-block: 10px; padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px));
+  background: color-mix(in srgb, var(--bg) 88%, transparent); backdrop-filter: saturate(1.4) blur(14px); -webkit-backdrop-filter: saturate(1.4) blur(14px);
+  border-bottom: 1px solid var(--border); }
+.brand { display: flex; align-items: center; gap: 9px; font-weight: 650; flex: 1; letter-spacing: -.01em; }
+.brand b { color: var(--accent); font-weight: 700; }
+.logo { width: 26px; height: 26px; border-radius: 8px; background: linear-gradient(135deg, var(--accent), var(--accent-2)); display: grid; place-items: center; }
+.logo svg { width: 15px; height: 15px; stroke: var(--on-accent); }
+.doc-title { flex: 1; min-width: 0; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.icon-btn { background: none; border: 0; width: 40px; height: 40px; border-radius: 12px; display: grid; place-items: center; cursor: pointer; }
+.icon-btn:hover { background: var(--surface-2); }
+
+main { max-width: 980px; margin: 0 auto; padding-block: 16px 24px; padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px)); }
+
+.btn { display: inline-flex; align-items: center; justify-content: center; gap: 8px; min-height: 44px; padding: 0 16px; border-radius: 12px;
+  border: 1px solid var(--border); background: var(--surface); cursor: pointer; font-weight: 560; text-decoration: none; }
+.btn.primary { background: var(--accent); border-color: var(--accent); color: var(--on-accent); }
+.btn.small { min-height: 34px; padding: 0 12px; font-size: 13.5px; }
+.btn.ok { border-color: var(--pass); color: var(--pass); } .btn.bad { border-color: var(--fail); color: var(--fail); }
+.btn.ok.on { background: var(--pass); color: var(--on-accent); } .btn.bad.on { background: var(--fail); color: var(--on-accent); }
+.btn:disabled { opacity: .5; cursor: default; }
+.btn:active:not(:disabled) { transform: scale(.98); }
+.card { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); box-shadow: var(--shadow); padding: 16px; }
+
+.hero { padding: 18px 2px 16px; display: grid; gap: 8px; }
+.hero h1 { font-size: clamp(26px, 6.4vw, 40px); letter-spacing: -.025em; font-weight: 700; }
+.grad { background: linear-gradient(90deg, var(--accent), var(--accent-2)); -webkit-background-clip: text; background-clip: text; color: transparent; }
+.hero p { margin: 0; max-width: 60ch; }
+.upload { text-align: center; border: 2px dashed var(--border); padding: 24px 16px; display: grid; gap: 12px; justify-items: center; transition: border-color .2s, background .2s; }
+.upload.drag { border-color: var(--accent); background: color-mix(in srgb, var(--accent) 7%, var(--surface)); }
+.upload-icon { width: 56px; height: 56px; border-radius: 16px; display: grid; place-items: center; background: color-mix(in srgb, var(--accent) 14%, transparent); color: var(--accent); }
+.upload-icon svg { width: 28px; height: 28px; }
+.upload .formats { display: flex; flex-wrap: wrap; gap: 6px; justify-content: center; }
+.fmt { font: 600 11px/1 var(--mono); letter-spacing: .04em; padding: 5px 7px; border-radius: 6px; background: var(--surface-2); color: var(--muted); }
+.options { width: 100%; text-align: left; border-top: 1px solid var(--border); padding-top: 10px; }
+.options summary { cursor: pointer; color: var(--muted); font-size: 14px; }
+.row { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 8px 0; }
+select, input[type=text], input[type=search], textarea { background: var(--surface-2); border: 1px solid var(--border); border-radius: 10px; padding: 8px 10px; min-height: 40px; min-width: 0; }
+.engine { display: flex; gap: 10px; align-items: center; font-size: 13.5px; color: var(--muted); }
+.engine .dot { width: 8px; height: 8px; }
+.section-head { display: flex; align-items: baseline; justify-content: space-between; margin: 26px 2px 10px; }
+.section-head h2 { font-size: 18px; }
+.recent { display: grid; gap: 10px; }
+.doc-row { display: flex; align-items: center; gap: 12px; padding: 12px 14px; cursor: pointer; }
+.doc-ico { width: 42px; height: 42px; border-radius: 12px; display: grid; place-items: center; font: 700 11px var(--mono); text-transform: uppercase; background: var(--surface-2); color: var(--muted); flex: none; }
+.doc-main { flex: 1; min-width: 0; }
+.doc-name { font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.doc-sub { font-size: 13px; color: var(--muted); font-variant-numeric: tabular-nums; }
+.empty { text-align: center; color: var(--muted); padding: 26px 12px; }
+.sample { margin-top: 10px; }
+
+.ring { width: 46px; height: 46px; border-radius: 50%; flex: none; display: grid; place-items: center;
+  background: conic-gradient(var(--c) calc(var(--v) * 1%), var(--surface-2) 0); font-weight: 700; font-size: 13px; font-variant-numeric: tabular-nums; }
+.ring::before { content: attr(data-v); width: 36px; height: 36px; border-radius: 50%; background: var(--surface); display: grid; place-items: center; }
+.ring.big { width: 108px; height: 108px; font-size: 28px; } .ring.big::before { width: 88px; height: 88px; }
+.spinner { width: 22px; height: 22px; border: 3px solid var(--surface-2); border-top-color: var(--accent); border-radius: 50%; animation: spin .8s linear infinite; flex: none; }
+@keyframes spin { to { transform: rotate(360deg); } }
+
+.doc-head { display: flex; gap: 14px; align-items: center; margin-bottom: 14px; }
+.stats { display: flex; gap: 8px; flex-wrap: wrap; }
+.stat { background: var(--surface); border: 1px solid var(--border); border-radius: 999px; padding: 4px 11px; font-size: 13px; font-variant-numeric: tabular-nums; }
+.stat b { font-weight: 650; }
+
+.tabbar { position: fixed; z-index: 30; left: 0; right: 0; bottom: 0; display: flex; overflow-x: auto; scrollbar-width: none;
+  padding-top: 6px; padding-bottom: calc(6px + env(safe-area-inset-bottom, 0px)); padding-left: max(6px, env(safe-area-inset-left, 0px)); padding-right: max(6px, env(safe-area-inset-right, 0px));
+  background: color-mix(in srgb, var(--surface) 90%, transparent); backdrop-filter: blur(16px); -webkit-backdrop-filter: blur(16px); border-top: 1px solid var(--border); }
+.tabbar::-webkit-scrollbar { display: none; }
+.tab { flex: 1 0 62px; display: flex; flex-direction: column; align-items: center; gap: 2px; background: none; border: 0; padding: 6px 4px; border-radius: 12px; font-size: 11px; color: var(--muted); cursor: pointer; }
+.tab.on { color: var(--accent); background: color-mix(in srgb, var(--accent) 11%, transparent); }
+@media (min-width: 900px) {
+  body { padding-bottom: 0; }
+  .tabbar { position: sticky; top: calc(61px + env(safe-area-inset-top, 0px)); bottom: auto; max-width: 980px; margin: 0 auto; border: 0; background: var(--bg); backdrop-filter: none; z-index: 15; }
+  .tab { flex-direction: row; font-size: 14px; gap: 6px; flex: 0 0 auto; padding: 8px 14px; }
+}
+
+.toolbar { display: flex; gap: 8px; align-items: center; margin-bottom: 10px; }
+.toolbar input[type=search] { flex: 1; }
+.chips { display: flex; gap: 6px; overflow-x: auto; padding: 2px 0 10px; scrollbar-width: none; }
+.chips::-webkit-scrollbar { display: none; }
+.chip { flex: none; display: inline-flex; align-items: center; gap: 6px; padding: 5px 11px; border-radius: 999px; border: 1px solid var(--border); background: var(--surface); font-size: 13px; cursor: pointer; white-space: nowrap; }
+.chip.on { border-color: var(--c, var(--accent)); background: color-mix(in srgb, var(--c, var(--accent)) 14%, var(--surface)); }
+.dot { width: 9px; height: 9px; border-radius: 50%; background: var(--c, var(--muted)); flex: none; display: inline-block; }
+.count { color: var(--muted); font-size: 12px; font-variant-numeric: tabular-nums; }
+
+.els { display: grid; gap: 8px; }
+.el { position: relative; padding: 11px 13px 11px 16px; border-radius: 13px; background: var(--surface); border: 1px solid var(--border); cursor: pointer; content-visibility: auto; contain-intrinsic-size: 80px; }
+.el::before { content: ""; position: absolute; left: 0; top: 10px; bottom: 10px; width: 4px; border-radius: 4px; background: var(--c); }
+.el-meta { display: flex; gap: 8px; align-items: center; font-size: 12px; color: var(--muted); margin-bottom: 3px; flex-wrap: wrap; }
+.badge { font-weight: 650; color: var(--c); font-size: 12px; font-family: var(--mono); }
+.el-text { overflow: hidden; display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; word-break: break-word; }
+.el.title .el-text { font-weight: 650; }
+.rv { margin-left: auto; font-weight: 700; } .rv.ok { color: var(--pass); } .rv.wrong { color: var(--fail); }
+.more { text-align: center; margin: 14px 0; }
+
+.pager { display: flex; align-items: center; gap: 8px; justify-content: center; margin-bottom: 10px; flex-wrap: wrap; }
+.page-scroll { overflow: auto; border-radius: 10px; }
+.page-wrap { position: relative; margin: 0 auto; border-radius: 10px; overflow: hidden; box-shadow: var(--shadow); background: var(--surface); min-height: 200px; }
+.page-wrap img { display: block; width: 100%; height: auto; }
+.page-wrap .spinner { position: absolute; left: 50%; top: 80px; margin-left: -11px; }
+.box { position: absolute; border: 1.5px solid var(--c); background: color-mix(in srgb, var(--c) 12%, transparent); border-radius: 3px; cursor: pointer; }
+.box:hover, .box.hl { background: color-mix(in srgb, var(--c) 32%, transparent); }
+.box-label { position: absolute; left: -1px; top: -15px; font: 600 9.5px/14px var(--mono); padding: 0 4px; background: var(--c); color: var(--surface); border-radius: 3px 3px 3px 0; white-space: nowrap; }
+.nolabels .box-label { display: none; }
+.legend { display: flex; flex-wrap: wrap; gap: 6px; margin: 10px 0; }
+
+.tree { list-style: none; margin: 0; padding: 0; }
+.node { display: flex; gap: 8px; align-items: baseline; padding: 7px 8px; border-radius: 10px; cursor: pointer; }
+.node:hover { background: var(--surface-2); }
+.node .n { color: var(--muted); font-size: 12px; margin-left: auto; white-space: nowrap; font-variant-numeric: tabular-nums; }
+.tree .tree { padding-left: 16px; border-left: 1px dashed var(--border); margin-left: 9px; }
+
+.tbl-card { margin-bottom: 14px; padding: 0; overflow: hidden; }
+.tbl-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; flex-wrap: wrap; padding: 10px 14px; border-bottom: 1px solid var(--border); font-size: 13px; }
+.tbl-scroll { overflow: auto; max-height: 60vh; }
+.tbl-scroll table { border-collapse: collapse; font-size: 13px; min-width: 100%; font-variant-numeric: tabular-nums; }
+.tbl-scroll td { border: 1px solid var(--border); padding: 6px 9px; vertical-align: top; white-space: nowrap; }
+.tbl-scroll tr:first-child td { background: var(--surface-2); font-weight: 600; position: sticky; top: 0; }
+
+.seg { display: inline-flex; background: var(--surface-2); border-radius: 12px; padding: 3px; }
+.seg button { border: 0; background: none; padding: 7px 14px; border-radius: 9px; cursor: pointer; font-weight: 560; color: var(--muted); }
+.seg button.on { background: var(--surface); color: var(--text); box-shadow: var(--shadow); }
+.slider { display: grid; gap: 4px; margin: 12px 0; }
+.slider label { display: flex; justify-content: space-between; font-size: 14px; font-variant-numeric: tabular-nums; }
+input[type=range] { width: 100%; accent-color: var(--accent); }
+.hist { display: flex; align-items: flex-end; gap: 2px; height: 56px; margin: 12px 0 4px; border-bottom: 1px solid var(--border); }
+.hist div { flex: 1; background: var(--accent); opacity: .8; border-radius: 3px 3px 0 0; min-height: 2px; }
+.chunk { padding: 12px 14px; margin-bottom: 8px; }
+.chunk-head { display: flex; justify-content: space-between; gap: 8px; font-size: 12px; color: var(--muted); margin-bottom: 4px; font-variant-numeric: tabular-nums; }
+.chunk-text { white-space: pre-wrap; word-break: break-word; font-size: 14px; max-height: 12em; overflow: hidden; }
+
+.val-hero { display: flex; gap: 18px; align-items: center; }
+.checks { display: grid; gap: 8px; margin-top: 14px; }
+.check { display: flex; gap: 12px; padding: 12px 14px; }
+.ci { width: 26px; height: 26px; border-radius: 50%; display: grid; place-items: center; color: var(--on-accent); flex: none; font-weight: 800; font-size: 13px; }
+.ci.pass { background: var(--pass); } .ci.warn { background: var(--warn); } .ci.fail { background: var(--fail); } .ci.info { background: var(--info); }
+.check h3 { font-size: 15px; margin-bottom: 2px; }
+.check p { margin: 0; font-size: 14px; color: var(--muted); }
+.bar { height: 10px; border-radius: 99px; background: var(--surface-2); overflow: hidden; display: flex; }
+.bar > div { height: 100%; }
+.kpis { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 10px; margin: 12px 0; }
+.kpi { padding: 12px 14px; }
+.kpi .v { font-size: 24px; font-weight: 700; letter-spacing: -.02em; font-variant-numeric: tabular-nums; }
+.kpi .l { font-size: 12.5px; color: var(--muted); }
+
+.review-card { display: flex; flex-direction: column; gap: 12px; }
+.review-card .txt { font-size: 17px; white-space: pre-wrap; word-break: break-word; overflow: auto; max-height: 40vh; }
+.review-actions { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+.review-actions .btn { min-height: 56px; font-size: 16px; }
+.progress { height: 6px; border-radius: 6px; background: var(--surface-2); overflow: hidden; }
+.progress > div { height: 100%; background: var(--accent); transition: width .25s; }
+
+.export-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 10px; }
+.export-grid .btn { flex-direction: column; min-height: 80px; align-items: flex-start; padding: 12px 14px; text-align: left; }
+.export-grid .btn small { color: var(--muted); font-weight: 400; }
+.export-grid .btn.on { border-color: var(--accent); background: color-mix(in srgb, var(--accent) 9%, var(--surface)); }
+.export-out { margin-top: 12px; display: grid; gap: 8px; }
+.export-out textarea { width: 100%; min-height: 260px; font: 12.5px/1.45 var(--mono); resize: vertical; }
+
+.sheet-backdrop { position: fixed; inset: 0; background: rgba(0,0,0,.35); z-index: 40; animation: fade .2s; }
+.sheet { position: fixed; z-index: 50; left: 0; right: 0; bottom: 0; max-height: 88vh; background: var(--surface); border-radius: 20px 20px 0 0;
+  box-shadow: 0 -10px 40px rgba(0,0,0,.25); display: flex; flex-direction: column; animation: up .25s cubic-bezier(.2,.8,.2,1);
+  padding-bottom: env(safe-area-inset-bottom, 0px); padding-left: env(safe-area-inset-left, 0px); padding-right: env(safe-area-inset-right, 0px); }
+@media (min-width: 900px) { .sheet { left: auto; right: 24px; bottom: 24px; width: 520px; border-radius: 20px; max-height: 80vh; } }
+.sheet-handle { width: 40px; height: 5px; border-radius: 5px; background: var(--border); margin: 8px auto 2px; flex: none; }
+.sheet-body { overflow: auto; padding: 8px 18px 20px; }
+.sheet-body h3 { margin: 6px 0 10px; }
+.kv { display: grid; grid-template-columns: 120px minmax(0, 1fr); gap: 4px 10px; font-size: 13.5px; margin: 10px 0; }
+.kv dt { color: var(--muted); } .kv dd { margin: 0; word-break: break-all; }
+.full-text { white-space: pre-wrap; word-break: break-word; background: var(--surface-2); border-radius: 12px; padding: 12px; max-height: 34vh; overflow: auto; }
+.btn-row { display: flex; gap: 8px; flex-wrap: wrap; margin: 12px 0; }
+@keyframes up { from { transform: translateY(30px); opacity: 0; } }
+@keyframes fade { from { opacity: 0; } }
+.toast { position: fixed; left: 50%; bottom: calc(var(--tabbar-h) + 20px + env(safe-area-inset-bottom, 0px)); transform: translateX(-50%) translateY(20px);
+  background: var(--text); color: var(--bg); padding: 10px 16px; border-radius: 12px; font-size: 14px; opacity: 0; pointer-events: none; transition: .25s; z-index: 60; max-width: 90vw; }
+.toast.show { opacity: 1; transform: translateX(-50%); }
+.processing { text-align: center; padding: 60px 10px; display: grid; gap: 10px; justify-items: center; }
+.processing .spinner { width: 44px; height: 44px; border-width: 4px; }
+.err { border-color: var(--fail); color: var(--fail); }
+.confirm { border-color: var(--fail); display: grid; gap: 10px; margin-top: 12px; }
+@media (prefers-reduced-motion: reduce) { *, *::before { animation: none !important; transition: none !important; } }
+</style>
+
+<header class="topbar">
+  <button class="icon-btn" id="backBtn" aria-label="Back to documents" hidden><svg viewBox="0 0 24 24"><path d="M15 18l-6-6 6-6"/></svg></button>
+  <div class="brand" id="brand"><span class="logo"><svg viewBox="0 0 24 24"><path d="M7 8h10M7 12h10M7 16h6"/></svg></span><span>docparse <b>Studio</b></span></div>
+  <div class="doc-title" id="docTitle" hidden></div>
+  <button class="icon-btn" id="themeBtn" aria-label="Switch light or dark theme"><svg viewBox="0 0 24 24"><path d="M21 12.8A9 9 0 1111.2 3a7 7 0 009.8 9.8z"/></svg></button>
+</header>
+<nav class="tabbar" id="tabbar" hidden></nav>
+<main id="main"></main>
+<div class="sheet-backdrop" id="sheetBackdrop" hidden></div>
+<section class="sheet" id="sheet" role="dialog" aria-modal="true" aria-label="Details" hidden><div class="sheet-handle"></div><div class="sheet-body" id="sheetBody"></div></section>
+<div class="toast" id="toast" role="status" aria-live="polite"></div>
+
+<script src="pdfjs/pdf.min.js"></script>
+<script>
+"use strict";
+// ============================================================ helpers
+const $ = (s, el = document) => el.querySelector(s);
+const main = $("#main");
+const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+const h = (html) => { const t = document.createElement("template"); t.innerHTML = html.trim(); return t.content.firstElementChild; };
+const color = (type) => `var(--t-${type}, var(--muted))`;
+const FURN = new Set(["Header", "Footer", "PageBreak"]);
+const TYPES = ["Title", "NarrativeText", "ListItem", "Table", "TableChunk", "Image", "FigureCaption", "CodeSnippet", "Text",
+  "UncategorizedText", "Address", "EmailAddress", "Formula", "Header", "Footer"];
+const ICON = {
+  list: '<path d="M8 6h13M8 12h13M8 18h13M3 6h.01M3 12h.01M3 18h.01"/>',
+  page: '<path d="M14 3H6a1 1 0 00-1 1v16a1 1 0 001 1h12a1 1 0 001-1V8z"/><path d="M14 3v5h5M8 13h8M8 17h5"/>',
+  tree: '<path d="M4 5h6M4 5v14h6M4 12h6M14 5h6M14 12h6M14 19h6"/>',
+  table: '<rect x="3" y="4" width="18" height="16" rx="2"/><path d="M3 10h18M3 15h18M9 4v16M15 4v16"/>',
+  chunk: '<rect x="3" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="3" width="7" height="7" rx="1.5"/><rect x="3" y="14" width="7" height="7" rx="1.5"/><rect x="14" y="14" width="7" height="7" rx="1.5"/>',
+  check: '<path d="M9 12l2 2 4-4"/><path d="M12 3l7 4v5c0 4.5-3 8-7 9-4-1-7-4.5-7-9V7z"/>',
+  download: '<path d="M8 4H6a2 2 0 00-2 2v12a2 2 0 002 2h12a2 2 0 002-2v-2M9 15l11-11M14 4h6v6"/>',
+};
+const TABS = [["elements", "Elements", "list"], ["pages", "Pages", "page"], ["outline", "Outline", "tree"], ["tables", "Tables", "table"],
+  ["chunks", "Chunks", "chunk"], ["validate", "Validate", "check"], ["export", "Export", "download"]];
+function toast(msg) { const t = $("#toast"); t.textContent = msg; t.classList.add("show"); clearTimeout(toast._t); toast._t = setTimeout(() => t.classList.remove("show"), 2600); }
+const uid = () => Array.from(crypto.getRandomValues(new Uint8Array(6)), (b) => b.toString(16).padStart(2, "0")).join("");
+
+// ============================================================ storage (IndexedDB on this device; memory if unavailable)
+const store = (() => {
+  const mem = { docs: new Map(), files: new Map() };
+  let dbp = null;
+  // Some embedded or private browsing contexts never answer indexedDB.open: give up after 2 s and keep
+  // documents in memory for this visit instead of hanging.
+  const open = () => dbp ||= new Promise((res) => {
+    const timer = setTimeout(() => res(null), 2000);
+    const done = (v) => { clearTimeout(timer); res(v); };
+    try {
+      const r = indexedDB.open("docparse-studio", 1);
+      r.onupgradeneeded = () => { r.result.createObjectStore("docs"); r.result.createObjectStore("files"); };
+      r.onsuccess = () => done(r.result); r.onerror = () => done(null); r.onblocked = () => done(null);
+    } catch { done(null); }
+  });
+  let persistent = null;
+  open().then((db) => (persistent = !!db));
+  const tx = async (name, mode, fn) => {
+    const db = await open();
+    if (!db) return fn(null, mem[name]);
+    return new Promise((res) => {
+      // never let a stuck transaction freeze the app: fall back to memory after 3 s
+      const timer = setTimeout(() => res(fn(null, mem[name])), 3000);
+      try {
+        const t = db.transaction(name, mode), s = t.objectStore(name); let out;
+        Promise.resolve(fn(s)).then((v) => (out = v));
+        t.oncomplete = () => { clearTimeout(timer); res(out); };
+        t.onerror = t.onabort = () => { clearTimeout(timer); res(fn(null, mem[name])); };
+      } catch { clearTimeout(timer); res(fn(null, mem[name])); }
+    });
+  };
+  const req = (r) => new Promise((res, rej) => { r.onsuccess = () => res(r.result); r.onerror = () => rej(r.error); });
+  return {
+    put: (name, key, val) => tx(name, "readwrite", (s, m) => s ? req(s.put(val, key)) : m.set(key, val)),
+    get: (name, key) => tx(name, "readonly", (s, m) => s ? req(s.get(key)) : m.get(key)),
+    del: (name, key) => tx(name, "readwrite", (s, m) => s ? req(s.delete(key)) : m.delete(key)),
+    all: (name) => tx(name, "readonly", (s, m) => s ? req(s.getAll()) : [...m.values()]),
+    get persistent() { return persistent; },
+  };
+})();
+
+// ============================================================ the Python engine (Pyodide in a Web Worker)
+const engine = (() => {
+  let worker = null, seq = 0, ready = false;
+  const waiting = new Map(), listeners = new Set();
+  function start() {
+    if (worker) return;
+    worker = new Worker("worker.js");
+    worker.onmessage = ({ data }) => {
+      if ("progress" in data) { listeners.forEach((f) => f(data.progress)); return; }
+      const p = waiting.get(data.id); if (!p) return;
+      waiting.delete(data.id);
+      data.ok ? p.res(data.result) : p.rej(new Error(data.error));
+    };
+    worker.onerror = (e) => { waiting.forEach((p) => p.rej(new Error(e.message || "The parser stopped unexpectedly."))); waiting.clear(); };
+  }
+  const call = (msg, transfer = []) => { start(); return new Promise((res, rej) => { const id = ++seq; waiting.set(id, { res, rej }); worker.postMessage({ id, ...msg }, transfer); }); };
+  return {
+    warm: () => call({ cmd: "init" }).then(() => { ready = true; listeners.forEach((f) => f("")); }),
+    get ready() { return ready; },
+    onProgress: (f) => listeners.add(f),
+    parse: (filename, bytes, options) => call({ cmd: "parse", filename, bytes, options }, [bytes]),
+    chunks: (elements, params) => call({ cmd: "chunks", elements, params }),
+    export: (elements, fmt, reviews, filename) => call({ cmd: "export", elements, fmt, reviews, filename }),
+  };
+})();
+let engineMsg = "Starting the parser…";
+engine.onProgress((m) => { engineMsg = m; const el = $("#engineStatus"); if (el) renderEngine(el); const p = $("#procMsg"); if (p && m) p.textContent = m; });
+
+// ============================================================ PDF page rendering (pdf.js, bundled)
+const pdfCache = new Map(), imgCache = new Map();
+if (window.pdfjsLib) pdfjsLib.GlobalWorkerOptions.workerSrc = "pdfjs/pdf.worker.min.js";
+async function pageImage(id, n) {
+  const key = id + ":" + n;
+  if (imgCache.has(key)) return imgCache.get(key);
+  if (!window.pdfjsLib) throw new Error("Page images are unavailable in this browser.");
+  if (!pdfCache.has(id)) {
+    const buf = await store.get("files", id);
+    if (!buf) throw new Error("The original file is no longer stored on this device.");
+    pdfCache.set(id, pdfjsLib.getDocument({ data: new Uint8Array(buf.slice(0)), isEvalSupported: false }).promise);
+  }
+  const pdf = await pdfCache.get(id), page = await pdf.getPage(n);
+  const vp = page.getViewport({ scale: Math.min(2.2, (devicePixelRatio || 1) * 1.25) });
+  const canvas = document.createElement("canvas"); canvas.width = vp.width; canvas.height = vp.height;
+  await page.render({ canvasContext: canvas.getContext("2d"), viewport: vp }).promise;
+  const url = canvas.toDataURL("image/png");
+  imgCache.set(key, url);
+  return url;
+}
+
+// ============================================================ state & routing (plain #names only)
+let doc = null;
+let ui = { filter: new Set(), q: "", limit: 200, page: 1, showTypes: null, review: null, zoom: 1, labels: true, exportFmt: null };
+const byId = () => (doc._byId ||= Object.fromEntries(doc.result.elements.map((e) => [e.element_id, e])));
+const els = () => doc.result.elements;
+(function theme() {
+  let saved = null; try { saved = localStorage.getItem("dps-theme"); } catch {}
+  if (saved) document.documentElement.dataset.theme = saved;
+  $("#themeBtn").onclick = () => {
+    const cur = document.documentElement.dataset.theme || (matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light");
+    const next = cur === "dark" ? "light" : "dark";
+    document.documentElement.dataset.theme = next; try { localStorage.setItem("dps-theme", next); } catch {}
+  };
+})();
+window.addEventListener("hashchange", route);
+$("#backBtn").onclick = () => { location.hash = "home"; };
+function route() {
+  closeSheet();
+  const m = location.hash.match(/^#doc-([0-9a-f]{12})(?:-([a-z]+))?$/);
+  return m ? showDoc(m[1], m[2] || "elements") : showHome();
+}
+
+// ============================================================ home
+function renderEngine(el) {
+  el.innerHTML = engine.ready ? `<span class="dot" style="--c:var(--pass)"></span>Parser ready. Files stay on this device${store.persistent === false ? " (this browser won't keep them after you close the page)" : ""}.`
+    : `<div class="spinner" style="width:14px;height:14px;border-width:2px"></div>${esc(engineMsg || "Starting the parser…")} (first load downloads about 20 MB)`;
+}
+async function showHome() {
+  doc = null;
+  $("#backBtn").hidden = true; $("#brand").hidden = false; $("#docTitle").hidden = true; $("#tabbar").hidden = true;
+  main.innerHTML = `
+  <section class="hero"><h1>Parse a document.<br><span class="grad">See exactly what came out.</span></h1>
+    <p class="muted">docparse runs right here in your browser. Pick a file to see its elements, pages, outline, tables and chunks, then check the result.</p></section>
+  <section class="card upload" id="drop">
+    <input type="file" id="fileInput" hidden accept=".pdf,.docx,.pptx,.xlsx,.html,.htm,.md,.markdown,.txt,.eml,.epub,.csv,.tsv,.xml,.json">
+    <div class="upload-icon"><svg viewBox="0 0 24 24"><path d="M12 16V4m0 0l-4 4m4-4l4 4M4 16v3a1 1 0 001 1h14a1 1 0 001-1v-3"/></svg></div>
+    <button class="btn primary" id="pickBtn">Choose a document</button>
+    <div class="formats">${["PDF", "DOCX", "PPTX", "XLSX", "HTML", "MD", "EML", "EPUB", "CSV", "TXT"].map((f) => `<span class="fmt">${f}</span>`).join("")}</div>
+    <div class="engine" id="engineStatus"></div>
+    <details class="options"><summary>Parsing options</summary>
+      <label class="row" for="optTables">Detect tables in PDFs <input type="checkbox" id="optTables" checked></label>
+      <label class="row" for="optLang">Languages <input type="text" id="optLang" placeholder="e.g. eng, deu"></label>
+      <p class="muted" style="font-size:13px;margin:4px 0 0">Scanned pages need OCR, which this browser version doesn't include. Encrypted PDFs aren't supported.</p>
+    </details>
+  </section>
+  <section><div class="section-head"><h2>Your documents</h2><span class="muted" id="recentCount"></span></div><div id="recent" class="recent"></div></section>`;
+  renderEngine($("#engineStatus"));
+  const drop = $("#drop"), input = $("#fileInput");
+  $("#pickBtn").onclick = () => input.click();
+  input.onchange = () => input.files[0] && upload(input.files[0]);
+  ["dragenter", "dragover"].forEach((ev) => drop.addEventListener(ev, (e) => { e.preventDefault(); drop.classList.add("drag"); }));
+  ["dragleave", "drop"].forEach((ev) => drop.addEventListener(ev, (e) => { e.preventDefault(); drop.classList.remove("drag"); }));
+  drop.addEventListener("drop", (e) => e.dataTransfer.files[0] && upload(e.dataTransfer.files[0]));
+  loadRecent();
+}
+async function loadRecent() {
+  const box = $("#recent"); if (!box) return;
+  const docs = ((await store.all("docs").catch(() => [])) || []).map((d) => d.meta).sort((a, b) => (b.uploaded || "").localeCompare(a.uploaded || ""));
+  $("#recentCount").textContent = docs.length ? `${docs.length} on this device` : "";
+  if (!docs.length) {
+    box.innerHTML = `<div class="card empty">No documents yet. Choose one above, or <button class="btn small sample" id="sampleBtn">try a sample document</button></div>`;
+    $("#sampleBtn").onclick = loadSample;
+    return;
+  }
+  box.replaceChildren(...docs.map((d) => {
+    const ext = (d.filename.split(".").pop() || "").slice(0, 4);
+    const right = d.status === "done" ? ring(d.score) : d.status === "error" ? `<span class="badge" style="--c:var(--fail)">failed</span>` : '<div class="spinner"></div>';
+    const sub = d.status === "done" ? `${d.pages ?? "–"} pages · ${d.elements} elements · ${d.seconds}s` : d.status === "error" ? esc(d.error) : "Parsing…";
+    const row = h(`<div class="card doc-row" role="button" tabindex="0"><div class="doc-ico">${esc(ext)}</div><div class="doc-main"><div class="doc-name">${esc(d.filename)}</div><div class="doc-sub">${sub}</div></div>${right}</div>`);
+    row.onclick = () => { location.hash = `doc-${d.id}`; };
+    row.onkeydown = (e) => e.key === "Enter" && row.click();
+    return row;
+  }));
+}
+function ring(v, big = false) {
+  const c = v >= 80 ? "var(--pass)" : v >= 55 ? "var(--warn)" : "var(--fail)";
+  return `<div class="ring${big ? " big" : ""}" style="--v:${v};--c:${c}" data-v="${v}" title="Parse health ${v} out of 100"></div>`;
+}
+function loadSample() {
+  const md = `# Quarterly Operations Review\n\nThe operations team closed the quarter ahead of plan. Shipping times fell by 12% while order volume grew, and two new warehouses opened in the north region.\n\n## Highlights\n\n- On-time delivery rose to 96.4%\n- Returns processing moved to a single queue\n  - Average handling time is now 2.1 days\n- Customer satisfaction reached a record 4.7 out of 5\n\n## Regional results\n\n| Region | Orders | On-time | Returns |\n|---|---|---|---|\n| North | 18,240 | 97.1% | 2.3% |\n| South | 15,902 | 95.8% | 2.9% |\n| West | 12,377 | 96.0% | 2.5% |\n\n## Next quarter\n\nThe team will automate carrier selection and pilot same-day delivery in two cities. Hiring for the new warehouses continues through the spring.\n\n### Risks\n\nFuel prices remain volatile, and one carrier contract is up for renewal in March.\n`;
+  upload(new File([md], "sample-operations-review.md", { type: "text/markdown" }));
+}
+async function upload(file) {
+  if (file.size > 60 * 1024 * 1024) { toast("That file is over 60 MB, too large to parse in the browser."); return; }
+  const id = uid();
+  const meta = { id, filename: file.name, size: file.size, uploaded: new Date().toISOString(), status: "parsing",
+    options: { tables: $("#optTables")?.checked ?? true, languages: ($("#optLang")?.value || "").split(",").map((s) => s.trim()).filter(Boolean) } };
+  let bytes;
+  try {
+    bytes = await file.arrayBuffer();
+    await store.put("files", id, bytes.slice(0));
+    await store.put("docs", id, { meta, result: null, reviews: {} });
+  } catch (e) { toast("Couldn't read that file: " + e.message); return; }
+  location.hash = `doc-${id}`;
+  try {
+    const r = JSON.parse(await engine.parse(file.name, bytes, meta.options));
+    Object.assign(meta, { status: "done", is_pdf: r.is_pdf, kind: r.filetype, pages: r.pages, seconds: r.seconds, elements: r.elements.length, score: r.validation.score });
+    await store.put("docs", id, { meta, result: { elements: r.elements, validation: r.validation, page_sizes: r.page_sizes }, reviews: {} });
+  } catch (e) {
+    Object.assign(meta, { status: "error", error: e.message });
+    await store.put("docs", id, { meta, result: null, reviews: {} });
+  }
+  if (location.hash === `#doc-${id}`) { doc = null; route(); } else if (!doc) loadRecent();
+}
+
+// ============================================================ document views
+async function showDoc(id, tab) {
+  $("#backBtn").hidden = false; $("#brand").hidden = true; $("#docTitle").hidden = false;
+  if (!doc || doc.meta.id !== id || doc.meta.status !== "done") {
+    doc = await store.get("docs", id);
+    ui = { ...ui, filter: new Set(), q: "", limit: 200, page: 1, showTypes: null, review: null, exportFmt: null };
+    if (!doc) { main.innerHTML = `<div class="card empty">This document isn't on this device any more. <a href="#home">Back to your documents</a></div>`; $("#tabbar").hidden = true; return; }
+  }
+  $("#docTitle").textContent = doc.meta.filename;
+  if (doc.meta.status !== "done") return showProcessing();
+  renderTabs(id, tab);
+  const view = { elements: viewElements, pages: viewPages, outline: viewOutline, tables: viewTables, chunks: viewChunks, validate: viewValidate, export: viewExport }[tab] || viewElements;
+  main.replaceChildren(docHeader());
+  view();
+  window.scrollTo({ top: 0 });
+}
+function showProcessing() {
+  $("#tabbar").hidden = true;
+  const m = doc.meta;
+  if (m.status === "error") {
+    main.innerHTML = `<div class="card err"><h3>Couldn't parse this file</h3><p>${esc(m.error)}</p></div><div class="btn-row"><a class="btn" href="#home">Back to your documents</a><button class="btn" id="delBad">Remove it</button></div>`;
+    $("#delBad").onclick = async () => { await store.del("docs", m.id); await store.del("files", m.id); location.hash = "home"; };
+    return;
+  }
+  main.innerHTML = `<div class="processing"><div class="spinner"></div><h2 id="procMsg">${esc(engineMsg || "Parsing…")}</h2>
+    <p class="muted">${engine.ready ? "Large documents can take a minute on a phone." : "The first run downloads the parser (about 20 MB); after that it starts quickly."}</p></div>`;
+}
+function renderTabs(id, active) {
+  const bar = $("#tabbar"); bar.hidden = false;
+  bar.replaceChildren(...TABS.map(([k, label, ic]) => {
+    const b = h(`<button class="tab${k === active ? " on" : ""}" aria-current="${k === active ? "page" : "false"}"><svg viewBox="0 0 24 24">${ICON[ic]}</svg>${label}</button>`);
+    b.onclick = () => { location.hash = `doc-${id}-${k}`; };
+    return b;
+  }));
+  bar.querySelector(".on")?.scrollIntoView({ inline: "center", block: "nearest" });
+}
+function docHeader() {
+  const m = doc.meta, v = doc.result.validation, reviewed = Object.keys(doc.reviews || {}).length;
+  return h(`<div class="doc-head">${ring(v.score)}<div class="stats"><span class="stat"><b>${m.pages ?? "–"}</b> pages</span><span class="stat"><b>${m.elements}</b> elements</span>
+    <span class="stat"><b>${m.seconds}</b> s</span>${reviewed ? `<span class="stat"><b>${reviewed}</b> reviewed</span>` : ""}</div></div>`);
+}
+
+function viewElements() {
+  const all = els(), counts = {};
+  all.forEach((e) => (counts[e.type] = (counts[e.type] || 0) + 1));
+  const bar = h(`<div><div class="toolbar"><input type="search" id="q" placeholder="Search text" aria-label="Search text" value="${esc(ui.q)}"></div><div class="chips"></div></div>`);
+  const chips = bar.querySelector(".chips");
+  Object.entries(counts).sort((a, b) => b[1] - a[1]).forEach(([t, n]) => {
+    const c = h(`<button class="chip${ui.filter.has(t) ? " on" : ""}" style="--c:${color(t)}"><span class="dot"></span>${t}<span class="count">${n}</span></button>`);
+    c.onclick = () => { ui.filter.has(t) ? ui.filter.delete(t) : ui.filter.add(t); ui.limit = 200; c.classList.toggle("on"); draw(); };
+    chips.append(c);
+  });
+  const list = h(`<div class="els"></div>`), more = h(`<div class="more"></div>`);
+  main.append(bar, list, more);
+  bar.querySelector("input").oninput = (e) => { ui.q = e.target.value; ui.limit = 200; draw(); };
+  function draw() {
+    const q = ui.q.trim().toLowerCase();
+    const items = all.filter((e) => (!ui.filter.size || ui.filter.has(e.type)) && (!q || e.text.toLowerCase().includes(q)));
+    list.replaceChildren(...items.slice(0, ui.limit).map(elCard)); more.replaceChildren();
+    if (!items.length) list.innerHTML = `<div class="empty">No elements match.</div>`;
+    if (items.length > ui.limit) { const b = h(`<button class="btn">Show ${Math.min(400, items.length - ui.limit)} more</button>`); b.onclick = () => { ui.limit += 400; draw(); }; more.append(b); }
+  }
+  draw();
+}
+function elCard(e) {
+  const md = e.metadata, r = doc.reviews?.[e.element_id];
+  const depth = e.type === "Title" && md.category_depth != null ? `L${md.category_depth + 1}` : md.category_depth ? `depth ${md.category_depth}` : "";
+  const mark = r ? `<span class="rv ${r.verdict === "ok" && !r.corrected_type ? "ok" : "wrong"}">${r.verdict === "ok" && !r.corrected_type ? "✓" : "✗"}</span>` : "";
+  const card = h(`<div class="el${e.type === "Title" ? " title" : ""}" style="--c:${color(e.type)}" role="button" tabindex="0"><div class="el-meta"><span class="badge">${e.type}</span>${md.page_number ? `<span>p.${md.page_number}</span>` : ""}<span>${depth}</span>${mark}</div><div class="el-text">${esc(e.text || "[image]")}</div></div>`);
+  card.onclick = () => openElement(e); card.onkeydown = (ev) => ev.key === "Enter" && openElement(e);
+  return card;
+}
+function openElement(e) {
+  const md = e.metadata, r = doc.reviews?.[e.element_id] || {}, parent = md.parent_id && byId()[md.parent_id];
+  const body = $("#sheetBody");
+  body.innerHTML = `<div class="el-meta"><span class="badge" style="--c:${color(e.type)}">${e.type}</span>${md.page_number ? `<span>page ${md.page_number}</span>` : ""}</div>
+    ${md.text_as_html ? `<div class="tbl-scroll card" style="padding:0;margin:8px 0">${md.text_as_html}</div>` : `<div class="full-text">${esc(e.text || "[image]")}</div>`}
+    <h3 style="margin-top:16px">Is this right?</h3>
+    <div class="btn-row"><button class="btn ok${r.verdict === "ok" ? " on" : ""}" data-v="ok">✓ Correct</button><button class="btn bad${r.verdict === "wrong" ? " on" : ""}" data-v="wrong">✗ Wrong</button>${md.coordinates && doc.meta.is_pdf ? '<button class="btn" id="goPage">Show on page</button>' : ""}</div>
+    <label class="row" for="relabel">Correct type <select id="relabel">${TYPES.map((t) => `<option ${t === (r.corrected_type || e.type) ? "selected" : ""}>${t}</option>`).join("")}</select></label>
+    <label class="row" for="note" style="align-items:flex-start">Note <textarea id="note" rows="2" style="flex:1" placeholder="What's wrong?">${esc(r.note || "")}</textarea></label>
+    <details><summary class="muted">Metadata</summary><dl class="kv"><dt>element_id</dt><dd class="mono">${e.element_id}</dd>
+      ${parent ? `<dt>parent</dt><dd><button class="btn small" id="goParent">${esc(parent.type)}: ${esc(parent.text.slice(0, 50))}</button></dd>` : ""}
+      ${Object.entries(md).filter(([k]) => !["text_as_html", "coordinates", "orig_elements"].includes(k)).map(([k, v]) => `<dt>${esc(k)}</dt><dd>${esc(typeof v === "object" ? JSON.stringify(v) : v)}</dd>`).join("")}</dl></details>`;
+  body.querySelectorAll("[data-v]").forEach((b) => (b.onclick = () => saveReview(e, { verdict: r.verdict === b.dataset.v ? null : b.dataset.v })));
+  $("#relabel", body).onchange = (ev) => saveReview(e, { corrected_type: ev.target.value === e.type ? null : ev.target.value, verdict: ev.target.value === e.type ? r.verdict : "wrong" });
+  $("#note", body).onchange = (ev) => saveReview(e, { note: ev.target.value || null });
+  $("#goPage", body)?.addEventListener("click", () => { ui.page = md.page_number; ui.highlight = e.element_id; location.hash = `doc-${doc.meta.id}-pages`; });
+  $("#goParent", body)?.addEventListener("click", () => openElement(parent));
+  openSheet();
+}
+async function saveReview(e, patch) {
+  const cur = doc.reviews?.[e.element_id] || {};
+  const next = { ...cur, ...patch };
+  Object.keys(next).forEach((k) => (next[k] == null || next[k] === "") && delete next[k]);
+  doc.reviews ||= {};
+  if (!next.verdict && !next.corrected_type && !next.note) delete doc.reviews[e.element_id];
+  else doc.reviews[e.element_id] = { ...next, at: new Date().toISOString() };
+  try { await store.put("docs", doc.meta.id, { meta: doc.meta, result: doc.result, reviews: doc.reviews }); } catch {}
+  if (!ui.review) openElement(e);
+  toast("Review saved");
+}
+function openSheet() { $("#sheet").hidden = false; $("#sheetBackdrop").hidden = false; }
+function closeSheet() { $("#sheet").hidden = true; $("#sheetBackdrop").hidden = true; }
+$("#sheetBackdrop").onclick = closeSheet;
+document.addEventListener("keydown", (e) => e.key === "Escape" && closeSheet());
+(function swipeToClose() {
+  let y0 = null; const s = $("#sheet");
+  s.addEventListener("touchstart", (e) => { if ($("#sheetBody").scrollTop <= 0) y0 = e.touches[0].clientY; }, { passive: true });
+  s.addEventListener("touchend", (e) => { if (y0 != null && e.changedTouches[0].clientY - y0 > 80) closeSheet(); y0 = null; });
+})();
+
+function viewPages() {
+  if (!doc.meta.is_pdf) { main.append(h(`<div class="card empty">Page view is for PDFs. This ${esc(doc.meta.kind || "")} file has no fixed pages, so use Elements and Outline.</div>`)); return; }
+  const n = doc.meta.pages || 1; ui.page = Math.min(Math.max(1, ui.page || 1), n);
+  const types = [...new Set(els().filter((e) => e.metadata.coordinates).map((e) => e.type))];
+  ui.showTypes ||= new Set(types);
+  const pager = h(`<div class="pager"><button class="btn small" id="prev" aria-label="Previous page">‹</button><select id="pageSel" aria-label="Page">${Array.from({ length: n }, (_, i) => `<option value="${i + 1}"${i + 1 === ui.page ? " selected" : ""}>Page ${i + 1} of ${n}</option>`).join("")}</select><button class="btn small" id="next" aria-label="Next page">›</button></div>`);
+  const legend = h(`<div class="legend"></div>`);
+  types.forEach((t) => { const c = h(`<button class="chip${ui.showTypes.has(t) ? " on" : ""}" style="--c:${color(t)}"><span class="dot"></span>${t}</button>`); c.onclick = () => { ui.showTypes.has(t) ? ui.showTypes.delete(t) : ui.showTypes.add(t); c.classList.toggle("on"); draw(); }; legend.append(c); });
+  const tools = h(`<div class="pager"><button class="btn small" id="zout" aria-label="Zoom out">−</button><span class="muted" id="zv"></span><button class="btn small" id="zin" aria-label="Zoom in">+</button><button class="chip${ui.labels ? " on" : ""}" id="lbl">Labels</button></div>`);
+  const scroller = h(`<div class="page-scroll"></div>`), wrap = h(`<div class="page-wrap${ui.labels ? "" : " nolabels"}"><img alt=""></div>`);
+  scroller.append(wrap); main.append(pager, legend, tools, scroller);
+  const zoom = (z) => { ui.zoom = Math.min(4, Math.max(1, z)); wrap.style.width = ui.zoom * 100 + "%"; $("#zv").textContent = Math.round(ui.zoom * 100) + "%"; };
+  $("#zin").onclick = () => zoom(ui.zoom + 0.5); $("#zout").onclick = () => zoom(ui.zoom - 0.5);
+  $("#lbl").onclick = () => { ui.labels = !ui.labels; $("#lbl").classList.toggle("on", ui.labels); wrap.classList.toggle("nolabels", !ui.labels); };
+  zoom(ui.zoom);
+  const go = (p) => { ui.page = Math.min(Math.max(1, p), n); $("#pageSel").value = ui.page; draw(); };
+  $("#prev").onclick = () => go(ui.page - 1); $("#next").onclick = () => go(ui.page + 1); $("#pageSel").onchange = (e) => go(+e.target.value);
+  let x0 = null;
+  wrap.addEventListener("touchstart", (e) => { if (e.touches.length === 1 && ui.zoom === 1) x0 = e.touches[0].clientX; }, { passive: true });
+  wrap.addEventListener("touchend", (e) => { if (x0 == null) return; const dx = e.changedTouches[0].clientX - x0; if (Math.abs(dx) > 70) go(ui.page + (dx < 0 ? 1 : -1)); x0 = null; });
+  async function draw() {
+    const img = wrap.querySelector("img"), want = ui.page;
+    wrap.querySelectorAll(".box,.spinner,.empty").forEach((b) => b.remove());
+    img.removeAttribute("src"); img.alt = `Page ${want}`;
+    const spin = h(`<div class="spinner"></div>`); wrap.append(spin);
+    try { const url = await pageImage(doc.meta.id, want); if (ui.page !== want) return; img.src = url; }
+    catch (e) { wrap.append(h(`<div class="empty">${esc(e.message)}</div>`)); }
+    finally { spin.remove(); }
+    const sz = doc.result.page_sizes?.[want - 1];
+    els().filter((e) => e.metadata.page_number === want && e.metadata.coordinates && ui.showTypes.has(e.type)).forEach((e) => {
+      const c = e.metadata.coordinates, W = c.layout_width || sz?.[0], H = c.layout_height || sz?.[1]; if (!W || !H) return;
+      const xs = c.points.map((p) => p[0]), ys = c.points.map((p) => p[1]);
+      const x0 = Math.min(...xs), x1 = Math.max(...xs), y0 = Math.min(...ys), y1 = Math.max(...ys);
+      const b = h(`<div class="box${ui.highlight === e.element_id ? " hl" : ""}" style="--c:${color(e.type)};left:${(x0 / W) * 100}%;top:${(y0 / H) * 100}%;width:${((x1 - x0) / W) * 100}%;height:${((y1 - y0) / H) * 100}%" title="${esc(e.type)}"><span class="box-label">${e.type}</span></div>`);
+      b.onclick = (ev) => { ev.stopPropagation(); openElement(e); };
+      wrap.append(b);
+    });
+    if (ui.highlight) setTimeout(() => wrap.querySelector(".hl")?.scrollIntoView({ block: "center", behavior: "smooth" }), 200);
+  }
+  draw();
+}
+function viewOutline() {
+  const all = els().filter((e) => !FURN.has(e.type)), titles = all.filter((e) => e.type === "Title");
+  if (!titles.length) { main.append(h(`<div class="card empty">No headings were found, so there is no outline.</div>`)); return; }
+  const kids = {}, nChildren = {};
+  all.forEach((e) => { const p = e.metadata.parent_id || "root"; nChildren[p] = (nChildren[p] || 0) + 1; if (e.type === "Title") (kids[p] ||= []).push(e); });
+  const orphans = titles.filter((t) => t.metadata.parent_id && !byId()[t.metadata.parent_id]);
+  const build = (list) => { const ul = h(`<ul class="tree"></ul>`); list.forEach((t) => {
+    const li = h(`<li><div class="node" role="button" tabindex="0"><span class="dot" style="--c:${color("Title")}"></span><span>${esc(t.text)}</span><span class="n">${t.metadata.page_number ? "p." + t.metadata.page_number + " · " : ""}${nChildren[t.element_id] || 0}</span></div></li>`);
+    li.firstChild.onclick = () => openElement(t); if (kids[t.element_id]) li.append(build(kids[t.element_id])); ul.append(li); }); return ul; };
+  const card = h(`<div class="card"></div>`); card.append(build([...(kids.root || []), ...orphans]));
+  main.append(h(`<p class="muted">${titles.length} headings. The number on the right counts the elements directly under each heading.</p>`), card);
+}
+function viewTables() {
+  const tables = els().filter((e) => e.type === "Table" || e.type === "TableChunk");
+  if (!tables.length) { main.append(h(`<div class="card empty">No tables were found.</div>`)); return; }
+  tables.forEach((t, i) => {
+    const html = t.metadata.text_as_html || `<table><tr><td>${esc(t.text)}</td></tr></table>`, rows = (html.match(/<tr>/g) || []).length;
+    const card = h(`<div class="card tbl-card"><div class="tbl-head"><b>Table ${i + 1}</b><span class="muted">${t.metadata.page_number ? "page " + t.metadata.page_number + " · " : ""}${rows} rows</span><span class="btn-row" style="margin:0"><button class="btn small" data-a="csv">Copy as CSV</button><button class="btn small" data-a="open">Review</button></span></div><div class="tbl-scroll">${html}</div></div>`);
+    card.querySelector('[data-a="csv"]').onclick = () => copyText([...card.querySelectorAll("tr")].map((tr) => [...tr.children].map((td) => `"${td.textContent.replace(/"/g, '""')}"`).join(",")).join("\n"), "Copied as CSV");
+    card.querySelector('[data-a="open"]').onclick = () => openElement(t);
+    main.append(card);
+  });
+}
+async function copyText(text, okMsg, fallbackEl) {
+  try { await navigator.clipboard.writeText(text); toast(okMsg); }
+  catch { if (fallbackEl) { fallbackEl.focus(); fallbackEl.select(); toast("Copy isn't available here. The text is selected, so use your device's Copy."); } else toast("Copy isn't available in this view."); }
+}
+const chunkCfg = { strategy: "by_title", max_characters: 1000, overlap: 0, combine_text_under_n_chars: 300 };
+function viewChunks() {
+  const panel = h(`<div class="card"><div class="seg" role="group" aria-label="Strategy"><button data-s="by_title">By title</button><button data-s="basic">Basic</button></div>
+    <div class="slider"><label for="max">Max characters <b id="vMax"></b></label><input type="range" id="max" min="200" max="4000" step="50"></div>
+    <div class="slider"><label for="ov">Overlap <b id="vOv"></b></label><input type="range" id="ov" min="0" max="400" step="10"></div>
+    <div class="slider" id="combWrap"><label for="comb">Combine sections under <b id="vComb"></b></label><input type="range" id="comb" min="0" max="2000" step="50"></div>
+    <div class="hist" id="hist"></div><div class="muted" id="cstats" style="font-size:13px"></div></div>`);
+  const list = h(`<div style="margin-top:12px"></div>`); main.append(panel, list);
+  const set = () => { panel.querySelectorAll(".seg button").forEach((b) => b.classList.toggle("on", b.dataset.s === chunkCfg.strategy));
+    $("#max").value = chunkCfg.max_characters; $("#vMax").textContent = chunkCfg.max_characters; $("#ov").value = chunkCfg.overlap; $("#vOv").textContent = chunkCfg.overlap;
+    $("#comb").value = chunkCfg.combine_text_under_n_chars; $("#vComb").textContent = chunkCfg.combine_text_under_n_chars; $("#combWrap").hidden = chunkCfg.strategy !== "by_title"; };
+  let timer; const run = () => { clearTimeout(timer); timer = setTimeout(load, 250); };
+  panel.querySelectorAll(".seg button").forEach((b) => (b.onclick = () => { chunkCfg.strategy = b.dataset.s; set(); run(); }));
+  $("#max").oninput = (e) => { chunkCfg.max_characters = +e.target.value; chunkCfg.overlap = Math.min(chunkCfg.overlap, chunkCfg.max_characters - 50); set(); run(); };
+  $("#ov").oninput = (e) => { chunkCfg.overlap = Math.min(+e.target.value, chunkCfg.max_characters - 50); set(); run(); };
+  $("#comb").oninput = (e) => { chunkCfg.combine_text_under_n_chars = +e.target.value; set(); run(); };
+  async function load() {
+    try {
+      const params = { ...chunkCfg, combine_text_under_n_chars: Math.min(chunkCfg.combine_text_under_n_chars, chunkCfg.max_characters) };
+      const r = JSON.parse(await engine.chunks(JSON.stringify(els()), params));
+      const bins = Array(24).fill(0); r.chunks.forEach((c) => bins[Math.min(23, Math.floor((c.text.length / chunkCfg.max_characters) * 24))]++);
+      const mx = Math.max(1, ...bins);
+      $("#hist").replaceChildren(...bins.map((b) => h(`<div style="height:${(b / mx) * 100}%" title="${b} chunks"></div>`)));
+      $("#cstats").textContent = `${r.stats.count} chunks · average ${r.stats.avg} · shortest ${r.stats.min} · longest ${r.stats.max} characters. Bars show the size spread from 0 to the maximum.`;
+      list.replaceChildren(...r.chunks.slice(0, 150).map((c, i) => h(`<div class="card chunk"><div class="chunk-head"><span>#${i + 1} · <span class="badge" style="--c:${color(c.type)}">${c.type}</span>${c.metadata.is_continuation ? " · continued" : ""}</span><span>${c.text.length} chars${c.metadata.page_number ? " · p." + c.metadata.page_number : ""}</span></div><div class="chunk-text">${esc(c.text)}</div></div>`)));
+      if (r.chunks.length > 150) list.append(h(`<p class="muted more">Showing the first 150 of ${r.chunks.length} chunks.</p>`));
+    } catch (e) { toast(e.message); }
+  }
+  set(); load();
+}
+function wilson(k, n, z = 1.96) { if (!n) return [0, 0]; const p = k / n, d = 1 + (z * z) / n, c = p + (z * z) / (2 * n), m = z * Math.sqrt((p * (1 - p)) / n + (z * z) / (4 * n * n)); return [Math.max(0, (c - m) / d), Math.min(1, (c + m) / d)]; }
+function viewValidate() {
+  const v = doc.result.validation, reviews = doc.reviews || {}, rv = Object.values(reviews).filter((r) => r.verdict);
+  const ok = rv.filter((r) => r.verdict === "ok" && !r.corrected_type).length, [lo, hi] = wilson(ok, rv.length);
+  main.append(h(`<div class="card val-hero">${ring(v.score, true)}<div><h2>Parse health</h2><p class="muted" style="margin:4px 0 0">Automatic checks that need no answer key. Below them, check a sample yourself.</p></div></div>`));
+  main.append(h(`<div class="kpis"><div class="card kpi"><div class="v">${rv.length}</div><div class="l">elements you reviewed</div></div>
+    <div class="card kpi"><div class="v">${rv.length ? Math.round((ok / rv.length) * 100) + "%" : "–"}</div><div class="l">judged correct${rv.length ? ` (95% range ${Math.round(lo * 100)}–${Math.round(hi * 100)}%)` : ""}</div></div>
+    <div class="card kpi"><div class="v">${Object.values(reviews).filter((r) => r.corrected_type).length}</div><div class="l">type corrections</div></div></div>`));
+  const start = h(`<div class="btn-row"><button class="btn primary" id="startReview">Review 20 random elements</button><a class="btn" href="#doc-${doc.meta.id}-export" id="toExport">Export reviews</a></div>`);
+  main.append(start); $("#startReview").onclick = startReview; $("#toExport").onclick = () => (ui.exportFmt = "reviews");
+  const list = h(`<div class="checks"></div>`), sym = { pass: "✓", warn: "!", fail: "✗", info: "i" };
+  v.checks.forEach((c) => list.append(h(`<div class="card check"><div class="ci ${c.status}" aria-label="${c.status}">${sym[c.status]}</div><div><h3>${esc(c.label)}</h3><p>${esc(c.detail)}</p></div></div>`)));
+  main.append(list);
+  const tc = v.type_counts, total = Object.values(tc).reduce((a, b) => a + b, 0) || 1;
+  main.append(h(`<div class="card" style="margin-top:12px"><h3 style="font-size:15px;margin-bottom:8px">Element types</h3><div class="bar">${Object.entries(tc).map(([t, n]) => `<div style="width:${(n / total) * 100}%;background:${color(t)}" title="${t}: ${n}"></div>`).join("")}</div>
+    <div class="legend">${Object.entries(tc).map(([t, n]) => `<span class="chip" style="--c:${color(t)}"><span class="dot"></span>${t}<span class="count">${n}</span></span>`).join("")}</div></div>`));
+}
+function startReview() {
+  const pool = els().filter((e) => !FURN.has(e.type) && !doc.reviews?.[e.element_id]?.verdict);
+  if (!pool.length) { toast("Everything here is already reviewed"); return; }
+  const copy = [...pool], sample = [];
+  while (sample.length < Math.min(20, copy.length)) sample.push(copy.splice(Math.floor(Math.random() * copy.length), 1)[0]);
+  ui.review = { items: sample, i: 0 }; drawReview();
+}
+function drawReview() {
+  const R = ui.review, e = R.items[R.i];
+  if (!e) { ui.review = null; closeSheet(); toast("Sample finished"); refreshValidate(); return; }
+  const md = e.metadata;
+  $("#sheetBody").innerHTML = `<div class="progress"><div style="width:${(R.i / R.items.length) * 100}%"></div></div>
+    <p class="muted" style="font-size:13px">${R.i + 1} of ${R.items.length}${md.page_number ? " · page " + md.page_number : ""}</p>
+    <div class="review-card"><div><span class="badge" style="--c:${color(e.type)};font-size:15px">${e.type}</span></div>
+    ${md.text_as_html ? `<div class="tbl-scroll">${md.text_as_html}</div>` : `<div class="txt">${esc(e.text || "[image]")}</div>`}
+    <p class="muted" style="margin:0;font-size:13px">Is the text complete, and is <b>${e.type}</b> the right type?</p>
+    <div class="review-actions"><button class="btn bad" id="rvBad">✗ Wrong</button><button class="btn ok" id="rvOk">✓ Correct</button></div>
+    <div class="btn-row" style="margin:0"><button class="btn small" id="rvSkip">Skip</button>${md.coordinates && doc.meta.is_pdf ? '<button class="btn small" id="rvPage">See it on the page</button>' : ""}<button class="btn small" id="rvStop">Stop</button></div></div>`;
+  const next = () => { R.i++; drawReview(); };
+  $("#rvOk").onclick = async () => { await saveReview(e, { verdict: "ok" }); next(); };
+  $("#rvBad").onclick = async () => { await saveReview(e, { verdict: "wrong" }); next(); };
+  $("#rvSkip").onclick = next;
+  $("#rvStop").onclick = () => { ui.review = null; closeSheet(); refreshValidate(); };
+  $("#rvPage")?.addEventListener("click", () => { ui.review = null; ui.page = md.page_number; ui.highlight = e.element_id; location.hash = `doc-${doc.meta.id}-pages`; });
+  openSheet();
+}
+function refreshValidate() { if (location.hash.endsWith("-validate")) { main.replaceChildren(docHeader()); viewValidate(); } }
+function viewExport() {
+  const opts = [["json", "JSON", "unstructured-compatible element list"], ["jsonl", "JSONL", "one element per line"], ["csv", "CSV", "for spreadsheets"],
+    ["markdown", "Markdown", "headings, lists and tables"], ["bigquery", "BigQuery rows", "NDJSON for the BigQuery schema"], ["reviews", "Your reviews", "your labels, as an answer key"]];
+  const grid = h(`<div class="export-grid"></div>`), out = h(`<div class="export-out" hidden><div class="btn-row" style="margin:0"><button class="btn primary" id="copyOut">Copy</button><span class="muted" id="outInfo" style="align-self:center;font-size:13px"></span></div><textarea id="outText" readonly aria-label="Export output"></textarea></div>`);
+  opts.forEach(([f, label, desc]) => { const b = h(`<button class="btn${ui.exportFmt === f ? " on" : ""}" data-f="${f}"><b>${label}</b><small>${desc}</small></button>`); b.onclick = () => show(f); grid.append(b); });
+  const del = h(`<div class="btn-row" style="margin-top:18px"><button class="btn bad" id="del">Delete from this device</button></div>`);
+  main.append(h(`<p class="muted" style="margin-top:0">Pick a format, then copy the result into a file or another app.</p>`), grid, out, del);
+  async function show(f) {
+    ui.exportFmt = f; grid.querySelectorAll("button").forEach((b) => b.classList.toggle("on", b.dataset.f === f));
+    out.hidden = false; $("#outText").value = "Preparing…";
+    try {
+      const text = await engine.export(JSON.stringify(els()), f, JSON.stringify(doc.reviews || {}), doc.meta.filename);
+      $("#outText").value = text; $("#outInfo").textContent = `${text.length.toLocaleString()} characters`;
+      $("#copyOut").onclick = () => copyText(text, "Copied", $("#outText"));
+    } catch (e) { $("#outText").value = e.message; }
+  }
+  if (ui.exportFmt) show(ui.exportFmt);
+  $("#del").onclick = () => {
+    if ($(".confirm")) return;
+    const c = h(`<div class="card confirm"><b>Delete ${esc(doc.meta.filename)} and your reviews from this device?</b><div class="btn-row" style="margin:0"><button class="btn bad" id="delYes">Delete</button><button class="btn" id="delNo">Keep it</button></div></div>`);
+    del.after(c); $("#delNo").onclick = () => c.remove();
+    $("#delYes").onclick = async () => { await store.del("docs", doc.meta.id); await store.del("files", doc.meta.id); imgCache.clear(); pdfCache.delete(doc.meta.id); doc = null; location.hash = "home"; toast("Deleted"); };
+  };
+}
+
+// ============================================================ boot
+route();
+engine.warm().catch((e) => { engineMsg = "The parser couldn't start: " + e.message; const el = $("#engineStatus"); if (el) el.textContent = engineMsg; });
+</script>
