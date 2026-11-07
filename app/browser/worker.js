@@ -48,6 +48,7 @@ self.onmessage = async (ev) => {
       finally { data.destroy(); }
       progress("");
     } else if (cmd === "chunks") result = studio.make_chunks(ev.data.elements, JSON.stringify(ev.data.params));
+    else if (cmd === "extract") result = studio.extract(ev.data.elements, JSON.stringify(ev.data.fields));
     else if (cmd === "export") result = studio.export(ev.data.elements, ev.data.fmt, ev.data.reviews || "{}", ev.data.filename || "");
     else throw new Error("unknown command " + cmd);
     studio.destroy();

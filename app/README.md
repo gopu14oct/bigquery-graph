@@ -15,6 +15,7 @@ browser and choose **Add to Home Screen** to install it like an app.
 | **Chunks** | try `by_title` or `basic` chunking live with sliders for size, overlap and section combining, with a size histogram |
 | **Validate** | an automatic *parse health* score (text coverage against `pdftotext`, empty pages, fragmentation, over-merged blocks, heading sanity, hierarchy, empty table cells, duplicates) plus **human review**: mark elements correct or wrong, relabel types, add notes, or step through a random sample of 20 in a one-handed review mode. Your accuracy estimate comes with a 95% confidence interval |
 | **Compare** | run the open-source `unstructured` library on the same file and see word agreement, type agreement and where the two disagree |
+| **Extract** | pull named fields (invoice, receipt, contract, résumé, research paper, or your own) out of the parsed elements. **Quick** runs offline rules over label/value lines and tables; in the browser build, **Claude** reads the numbered elements and returns each value with its source element and an exact quote, which the app checks against the document (*verified* / *check this*). Values are editable, link to their source, and can run across all documents into one CSV |
 | **Export** | JSON (unstructured-compatible), JSONL, CSV, Markdown, BigQuery rows, and your reviews as an answer key |
 
 Dark and light themes follow the system. The app shell is cached by a service worker.

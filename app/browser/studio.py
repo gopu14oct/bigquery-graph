@@ -82,3 +82,9 @@ def make_chunks(elements_json: str, params_json: str) -> str:
 
 def export(elements_json: str, fmt: str, reviews_json: str = "{}", filename: str = "") -> str:
     return exporters.render(json.loads(elements_json), fmt, json.loads(reviews_json), filename)
+
+
+def extract(elements_json: str, fields_json: str) -> str:
+    from app.extract import extract as run
+
+    return json.dumps(run(json.loads(elements_json), json.loads(fields_json)))

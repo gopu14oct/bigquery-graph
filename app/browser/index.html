@@ -233,6 +233,26 @@ input[type=range] { width: 100%; accent-color: var(--accent); }
 .processing .spinner { width: 44px; height: 44px; border-width: 4px; }
 .err { border-color: var(--fail); color: var(--fail); }
 .confirm { border-color: var(--fail); display: grid; gap: 10px; margin-top: 12px; }
+.tpls { display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 10px; }
+.fields-ed { display: grid; gap: 6px; margin-top: 8px; }
+.f-row { display: grid; grid-template-columns: minmax(0, 1fr) 104px 36px; gap: 6px; align-items: center; }
+.f-row input, .f-row select { width: 100%; min-height: 38px; }
+.run-row { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; margin: 12px 0; }
+.results { display: grid; gap: 8px; }
+.field { padding: 12px 14px; display: grid; gap: 6px; }
+.field-head { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.field-head b { font-size: 14.5px; }
+.pill { font: 600 11px/1 var(--mono); padding: 4px 7px; border-radius: 999px; border: 1px solid currentColor; letter-spacing: .02em; }
+.pill.ok { color: var(--pass); } .pill.warn { color: var(--warn); } .pill.miss { color: var(--muted); } .pill.ai { color: var(--accent); } .pill.rule { color: var(--accent-2); }
+.field input.val { width: 100%; font-weight: 600; font-size: 15.5px; }
+.field .src { font-size: 13px; color: var(--muted); }
+.field .src mark { background: color-mix(in srgb, var(--accent) 22%, transparent); color: inherit; border-radius: 3px; padding: 0 2px; }
+.field.missing input.val { font-weight: 400; color: var(--muted); }
+.batch-table { overflow: auto; max-height: 60vh; }
+.batch-table table { border-collapse: collapse; font-size: 13px; min-width: 100%; font-variant-numeric: tabular-nums; }
+.batch-table td, .batch-table th { border: 1px solid var(--border); padding: 6px 9px; text-align: left; vertical-align: top; white-space: nowrap; }
+.batch-table th { background: var(--surface-2); position: sticky; top: 0; }
+.batch-table td.low { color: var(--warn); }
 @media (prefers-reduced-motion: reduce) { *, *::before { animation: none !important; transition: none !important; } }
 </style>
 
@@ -267,9 +287,10 @@ const ICON = {
   table: '<rect x="3" y="4" width="18" height="16" rx="2"/><path d="M3 10h18M3 15h18M9 4v16M15 4v16"/>',
   chunk: '<rect x="3" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="3" width="7" height="7" rx="1.5"/><rect x="3" y="14" width="7" height="7" rx="1.5"/><rect x="14" y="14" width="7" height="7" rx="1.5"/>',
   check: '<path d="M9 12l2 2 4-4"/><path d="M12 3l7 4v5c0 4.5-3 8-7 9-4-1-7-4.5-7-9V7z"/>',
+  extract: '<path d="M4 7V5a1 1 0 011-1h2M17 4h2a1 1 0 011 1v2M20 17v2a1 1 0 01-1 1h-2M7 20H5a1 1 0 01-1-1v-2"/><path d="M8 9h8M8 12h8M8 15h5"/>',
   download: '<path d="M8 4H6a2 2 0 00-2 2v12a2 2 0 002 2h12a2 2 0 002-2v-2M9 15l11-11M14 4h6v6"/>',
 };
-const TABS = [["elements", "Elements", "list"], ["pages", "Pages", "page"], ["outline", "Outline", "tree"], ["tables", "Tables", "table"],
+const TABS = [["elements", "Elements", "list"], ["extract", "Extract", "extract"], ["pages", "Pages", "page"], ["outline", "Outline", "tree"], ["tables", "Tables", "table"],
   ["chunks", "Chunks", "chunk"], ["validate", "Validate", "check"], ["export", "Export", "download"]];
 function toast(msg) { const t = $("#toast"); t.textContent = msg; t.classList.add("show"); clearTimeout(toast._t); toast._t = setTimeout(() => t.classList.remove("show"), 2600); }
 const uid = () => Array.from(crypto.getRandomValues(new Uint8Array(6)), (b) => b.toString(16).padStart(2, "0")).join("");
@@ -338,6 +359,7 @@ const engine = (() => {
     parse: (filename, bytes, options) => call({ cmd: "parse", filename, bytes, options }, [bytes]),
     chunks: (elements, params) => call({ cmd: "chunks", elements, params }),
     export: (elements, fmt, reviews, filename) => call({ cmd: "export", elements, fmt, reviews, filename }),
+    extract: (elements, fields) => call({ cmd: "extract", elements, fields }),
   };
 })();
 let engineMsg = "Starting the parser…";
@@ -424,8 +446,8 @@ async function loadRecent() {
   const docs = ((await store.all("docs").catch(() => [])) || []).map((d) => d.meta).sort((a, b) => (b.uploaded || "").localeCompare(a.uploaded || ""));
   $("#recentCount").textContent = docs.length ? `${docs.length} on this device` : "";
   if (!docs.length) {
-    box.innerHTML = `<div class="card empty">No documents yet. Choose one above, or <button class="btn small sample" id="sampleBtn">try a sample document</button></div>`;
-    $("#sampleBtn").onclick = loadSample;
+    box.innerHTML = `<div class="card empty">No documents yet. Choose one above, or try a sample:<div class="btn-row" style="justify-content:center"><button class="btn small" id="sampleBtn">Operations report</button><button class="btn small" id="sampleInv">Invoice</button></div></div>`;
+    $("#sampleBtn").onclick = () => loadSample("report"); $("#sampleInv").onclick = () => loadSample("invoice");
     return;
   }
   box.replaceChildren(...docs.map((d) => {
@@ -442,7 +464,12 @@ function ring(v, big = false) {
   const c = v >= 80 ? "var(--pass)" : v >= 55 ? "var(--warn)" : "var(--fail)";
   return `<div class="ring${big ? " big" : ""}" style="--v:${v};--c:${c}" data-v="${v}" title="Parse health ${v} out of 100"></div>`;
 }
-function loadSample() {
+function loadSample(kind = "report") {
+  if (kind === "invoice") {
+    const inv = `# ACME Supplies Ltd.\n\n12 Harbour Road, Leeds LS1 4AB\n\n## INVOICE #INV-4521\n\nInvoice date: February 13, 2026\n\nDue date: March 15, 2026\n\nBill to: Jane Smith, Northwind Traders\n\n| Item | Qty | Unit price | Amount |\n|---|---|---|---|\n| Printer paper (A4, 500 sheets) | 10 | $5.00 | $50.00 |\n| Ink cartridge, black | 2 | $30.00 | $60.00 |\n\n| Subtotal | $110.00 |\n|---|---|\n| VAT (20%) | $22.00 |\n| Total due | $132.00 |\n\nPayment terms: 30 days. Questions? billing@acme.example or +44 113 496 0123\n`;
+    upload(new File([inv], "sample-invoice.md", { type: "text/markdown" }));
+    return;
+  }
   const md = `# Quarterly Operations Review\n\nThe operations team closed the quarter ahead of plan. Shipping times fell by 12% while order volume grew, and two new warehouses opened in the north region.\n\n## Highlights\n\n- On-time delivery rose to 96.4%\n- Returns processing moved to a single queue\n  - Average handling time is now 2.1 days\n- Customer satisfaction reached a record 4.7 out of 5\n\n## Regional results\n\n| Region | Orders | On-time | Returns |\n|---|---|---|---|\n| North | 18,240 | 97.1% | 2.3% |\n| South | 15,902 | 95.8% | 2.9% |\n| West | 12,377 | 96.0% | 2.5% |\n\n## Next quarter\n\nThe team will automate carrier selection and pilot same-day delivery in two cities. Hiring for the new warehouses continues through the spring.\n\n### Risks\n\nFuel prices remain volatile, and one carrier contract is up for renewal in March.\n`;
   upload(new File([md], "sample-operations-review.md", { type: "text/markdown" }));
 }
@@ -480,7 +507,7 @@ async function showDoc(id, tab) {
   $("#docTitle").textContent = doc.meta.filename;
   if (doc.meta.status !== "done") return showProcessing();
   renderTabs(id, tab);
-  const view = { elements: viewElements, pages: viewPages, outline: viewOutline, tables: viewTables, chunks: viewChunks, validate: viewValidate, export: viewExport }[tab] || viewElements;
+  const view = { elements: viewElements, extract: viewExtract, pages: viewPages, outline: viewOutline, tables: viewTables, chunks: viewChunks, validate: viewValidate, export: viewExport }[tab] || viewElements;
   main.replaceChildren(docHeader());
   view();
   window.scrollTo({ top: 0 });
@@ -567,9 +594,12 @@ async function saveReview(e, patch) {
   doc.reviews ||= {};
   if (!next.verdict && !next.corrected_type && !next.note) delete doc.reviews[e.element_id];
   else doc.reviews[e.element_id] = { ...next, at: new Date().toISOString() };
-  try { await store.put("docs", doc.meta.id, { meta: doc.meta, result: doc.result, reviews: doc.reviews }); } catch {}
+  await saveDoc();
   if (!ui.review) openElement(e);
   toast("Review saved");
+}
+async function saveDoc(d = doc) {
+  try { await store.put("docs", d.meta.id, { meta: d.meta, result: d.result, reviews: d.reviews || {}, extraction: d.extraction || null }); } catch {}
 }
 function openSheet() { $("#sheet").hidden = false; $("#sheetBackdrop").hidden = false; }
 function closeSheet() { $("#sheet").hidden = true; $("#sheetBackdrop").hidden = true; }
@@ -679,6 +709,263 @@ function viewChunks() {
   }
   set(); load();
 }
+// ============================================================ capabilities (light up when the viewer grants them)
+const caps = { sample: null, downloads: null };
+(async () => {
+  try { caps.sample = await window.claude?.use?.("sample") ?? null; } catch { caps.sample = null; }
+  try { caps.downloads = await window.claude?.use?.("downloads") ?? null; } catch { caps.downloads = null; }
+  if (location.hash.endsWith("-extract") || location.hash.endsWith("-export")) route();
+})();
+async function offerDownload(filename, data, fallbackEl) {
+  if (!caps.downloads) return copyText(typeof data === "string" ? data : "", "Copied (downloads aren't available here)", fallbackEl);
+  try { await caps.downloads.save({ filename, data }); toast("Saved"); }
+  catch (e) { if (e?.code !== "declined") toast(e?.code === "rejected_extension" ? "That file type can't be downloaded here." : "Download isn't available here."); }
+}
+
+// ============================================================ extraction
+const TEMPLATES = {
+  invoice: { label: "Invoice", fields: [
+    { name: "Invoice number", type: "id", aliases: ["invoice", "invoice no", "invoice #", "inv no"] },
+    { name: "Invoice date", type: "date", aliases: ["date", "issue date", "dated"] },
+    { name: "Due date", type: "date", aliases: ["payment due", "due"] },
+    { name: "Vendor", type: "text", aliases: ["from", "seller", "supplier", "company"] },
+    { name: "Customer", type: "text", aliases: ["bill to", "billed to", "sold to", "client"] },
+    { name: "Subtotal", type: "money", aliases: ["sub total", "net amount"] },
+    { name: "Tax", type: "money", aliases: ["vat", "gst", "sales tax"] },
+    { name: "Total", type: "money", aliases: ["total due", "amount due", "grand total", "balance due"] },
+    { name: "Line items", type: "list", aliases: ["items", "description"] } ] },
+  receipt: { label: "Receipt", fields: [
+    { name: "Merchant", type: "text", aliases: ["store", "shop"] }, { name: "Date", type: "date", aliases: [] },
+    { name: "Total", type: "money", aliases: ["amount", "total paid"] }, { name: "Payment method", type: "text", aliases: ["paid by", "card"] },
+    { name: "Items", type: "list", aliases: [] } ] },
+  contract: { label: "Contract", fields: [
+    { name: "Parties", type: "text", aliases: ["between", "party"] }, { name: "Effective date", type: "date", aliases: ["commencement date", "start date"] },
+    { name: "Term", type: "text", aliases: ["duration", "term of agreement"] }, { name: "Termination notice", type: "text", aliases: ["termination", "notice period"] },
+    { name: "Payment terms", type: "text", aliases: ["fees", "payment"] }, { name: "Governing law", type: "text", aliases: ["jurisdiction", "applicable law"] },
+    { name: "Renewal", type: "text", aliases: ["auto-renewal", "renewal term"] } ] },
+  resume: { label: "Résumé", fields: [
+    { name: "Name", type: "text", aliases: [] }, { name: "Email", type: "email", aliases: ["e-mail"] }, { name: "Phone", type: "phone", aliases: ["mobile", "tel"] },
+    { name: "Current title", type: "text", aliases: ["title", "position"] }, { name: "Skills", type: "text", aliases: ["technical skills", "core skills"] },
+    { name: "Experience", type: "list", aliases: ["work experience", "employment"] }, { name: "Education", type: "text", aliases: ["degree", "university"] } ] },
+  paper: { label: "Research paper", fields: [
+    { name: "Title", type: "text", aliases: [] }, { name: "Authors", type: "text", aliases: ["by"] }, { name: "Year", type: "number", aliases: ["published"] },
+    { name: "Main contribution", type: "text", aliases: ["abstract", "we propose", "contribution"] }, { name: "Datasets", type: "text", aliases: ["dataset", "data"] },
+    { name: "Key result", type: "text", aliases: ["results", "accuracy"] } ] },
+};
+const FTYPES = [["text", "Text"], ["money", "Amount"], ["date", "Date"], ["number", "Number"], ["id", "ID / code"], ["email", "Email"], ["phone", "Phone"], ["list", "Table / list"]];
+function myTemplates() { try { return JSON.parse(localStorage.getItem("dps-templates") || "{}"); } catch { return {}; } }
+function saveMyTemplate(name, fields) { const t = myTemplates(); t[name] = fields; try { localStorage.setItem("dps-templates", JSON.stringify(t)); return true; } catch { return false; } }
+const xstate = { ctl: null, running: false };
+
+function viewExtract() {
+  doc.extraction ||= { template: "invoice", fields: structuredClone(TEMPLATES.invoice.fields), results: null, engine: null };
+  const X = doc.extraction;
+  const mine = myTemplates();
+  const intro = h(`<p class="muted" style="margin:0 0 10px">Choose what to pull out of this document. Quick runs here instantly; ${caps.sample ? "Claude reads the parsed text and shows where each answer came from." : "Claude extraction appears when this page can ask Claude."}</p>`);
+  const tpls = h(`<div class="tpls"></div>`);
+  const all = { ...Object.fromEntries(Object.entries(TEMPLATES).map(([k, v]) => [k, v])), ...Object.fromEntries(Object.entries(mine).map(([k, v]) => ["my:" + k, { label: k, fields: v }])) };
+  Object.entries(all).forEach(([k, t]) => {
+    const c = h(`<button class="chip${X.template === k ? " on" : ""}">${esc(t.label)}</button>`);
+    c.onclick = () => { X.template = k; X.fields = structuredClone(t.fields); X.results = null; saveDoc(); rerender(); };
+    tpls.append(c);
+  });
+  const custom = h(`<button class="chip${X.template === "custom" ? " on" : ""}">+ Your own fields</button>`);
+  custom.onclick = () => { X.template = "custom"; X.fields = [{ name: "", type: "text", aliases: [] }]; X.results = null; rerender(); };
+  tpls.append(custom);
+
+  const ed = h(`<details class="card" ${X.template === "custom" ? "open" : ""}><summary><b>Fields</b> <span class="muted">(${X.fields.length})</span></summary><div class="fields-ed"></div>
+    <div class="btn-row" style="margin-bottom:0"><button class="btn small" id="addF">Add field</button><button class="btn small" id="saveT">Save as my template</button></div></details>`);
+  const box = ed.querySelector(".fields-ed");
+  X.fields.forEach((f, i) => {
+    const row = h(`<div class="f-row"><input type="text" aria-label="Field name" placeholder="Field name, e.g. Policy number" value="${esc(f.name)}">
+      <select aria-label="Field type">${FTYPES.map(([v, l]) => `<option value="${v}"${v === (f.type || "text") ? " selected" : ""}>${l}</option>`).join("")}</select>
+      <button class="icon-btn" aria-label="Remove field">✕</button></div>`);
+    row.children[0].onchange = (e) => { f.name = e.target.value.trim(); saveDoc(); };
+    row.children[1].onchange = (e) => { f.type = e.target.value; saveDoc(); };
+    row.children[2].onclick = () => { X.fields.splice(i, 1); saveDoc(); rerender(); };
+    box.append(row);
+  });
+  ed.querySelector("#addF").onclick = () => { X.fields.push({ name: "", type: "text", aliases: [] }); ed.open = true; rerender(true); };
+  ed.querySelector("#saveT").onclick = () => {
+    const name = (X.fields.map((f) => f.name).filter(Boolean)[0] || "My fields").slice(0, 24) + (X.template.startsWith("my:") ? "" : " set");
+    const key = X.template.startsWith("my:") ? X.template.slice(3) : name;
+    if (saveMyTemplate(key, X.fields.filter((f) => f.name))) { X.template = "my:" + key; toast(`Saved as “${key}”`); rerender(); } else toast("This browser can't save templates.");
+  };
+
+  const run = h(`<div class="run-row"><button class="btn" id="runQuick">Quick extract</button>
+    ${caps.sample ? '<button class="btn primary" id="runAI">Extract with Claude</button><button class="btn small" id="stopAI" hidden>Stop</button>' : ""}
+    <span class="muted" id="runMsg" style="font-size:13px"></span></div>`);
+  const out = h(`<div class="results"></div>`);
+  const tools = h(`<div class="btn-row" hidden id="xTools"><button class="btn small" id="xCsv">Download CSV</button><button class="btn small" id="xJson">Download JSON</button><button class="btn small" id="xCopy">Copy JSON</button><button class="btn small" id="xBatch">Run on all documents</button></div>`);
+  const batch = h(`<div id="batchOut"></div>`);
+  main.append(intro, tpls, ed, run, tools, out, batch);
+
+  const fields = () => X.fields.filter((f) => f.name);
+  $("#runQuick").onclick = async () => {
+    if (!fields().length) { toast("Add at least one field"); return; }
+    $("#runMsg").textContent = "Extracting…";
+    try { X.results = JSON.parse(await engine.extract(JSON.stringify(els()), fields())).map((r) => ({ ...r, engine: "rules" })); X.engine = "rules"; await saveDoc(); drawResults(); $("#runMsg").textContent = ""; }
+    catch (e) { $("#runMsg").textContent = e.message; }
+  };
+  if (caps.sample) {
+    $("#runAI").onclick = async () => {
+      if (!fields().length) { toast("Add at least one field"); return; }
+      xstate.ctl = new AbortController(); $("#runAI").disabled = true; $("#stopAI").hidden = false; $("#runMsg").textContent = "Claude is reading the document…";
+      try { X.results = await extractWithClaude(els(), fields(), xstate.ctl.signal); X.engine = "claude"; await saveDoc(); drawResults(); $("#runMsg").textContent = ""; }
+      catch (e) { $("#runMsg").textContent = sampleErr(e); }
+      finally { $("#runAI").disabled = false; $("#stopAI").hidden = true; }
+    };
+    $("#stopAI").onclick = () => xstate.ctl?.abort();
+  }
+  $("#xCsv").onclick = () => offerDownload(baseName() + "-fields.csv", toCsv([fieldRow(doc.meta.filename, X.results)], X.results.map((r) => r.name)));
+  $("#xJson").onclick = () => offerDownload(baseName() + "-fields.json", JSON.stringify(resultsObject(X.results), null, 2));
+  $("#xCopy").onclick = () => copyText(JSON.stringify(resultsObject(X.results), null, 2), "Copied");
+  $("#xBatch").onclick = () => runBatch(X.engine || "rules");
+
+  function drawResults() {
+    $("#xTools").hidden = !X.results;
+    out.replaceChildren(...(X.results || []).map((r, i) => {
+      const missing = r.value == null || r.value === "";
+      const pill = missing ? '<span class="pill miss">not found</span>'
+        : r.engine === "claude" ? (r.verified ? '<span class="pill ok">verified</span>' : '<span class="pill warn">check this</span>')
+        : `<span class="pill ${r.confidence >= 0.75 ? "ok" : "warn"}">${r.confidence >= 0.75 ? "strong match" : "weak match"}</span>`;
+      const how = `<span class="pill ${r.engine === "claude" ? "ai" : "rule"}">${r.engine === "claude" ? "Claude" : "Quick"}</span>`;
+      const isList = Array.isArray(r.value);
+      const card = h(`<div class="card field${missing ? " missing" : ""}"><div class="field-head"><b>${esc(r.name)}</b>${pill}${how}${r.edited ? '<span class="pill miss">edited</span>' : ""}</div>
+        ${isList ? `<div class="tbl-scroll"><table>${listTable(r.value)}</table></div>` : `<input class="val" type="text" aria-label="${esc(r.name)}" value="${esc(missing ? "" : r.value)}" placeholder="Not found: type the value to fill it in">`}
+        ${r.snippet ? `<div class="src">${markSnippet(r.snippet, isList ? "" : r.value)}${r.page ? ` · p.${r.page}` : ""}</div>` : ""}
+        ${r.note ? `<div class="src">${esc(r.note)}</div>` : ""}
+        ${r.element_id && byId()[r.element_id] ? '<div class="btn-row" style="margin:0"><button class="btn small" data-a="src">Show source</button></div>' : ""}</div>`);
+      const inp = card.querySelector("input.val");
+      if (inp) inp.onchange = async () => { r.value = inp.value.trim() || null; r.edited = true; await saveDoc(); drawResults(); };
+      card.querySelector('[data-a="src"]')?.addEventListener("click", () => openElement(byId()[r.element_id]));
+      return card;
+    }));
+  }
+  function rerender(keepOpen) { main.replaceChildren(docHeader()); viewExtract(); if (keepOpen) main.querySelector("details").open = true; }
+  drawResults();
+}
+const baseName = () => doc.meta.filename.replace(/\.[^.]+$/, "");
+function listTable(rows) {
+  const cols = [...new Set(rows.flatMap((r) => (r && typeof r === "object" ? Object.keys(r) : ["value"])))];
+  return `<tr>${cols.map((c) => `<td>${esc(c)}</td>`).join("")}</tr>` + rows.map((r) => `<tr>${cols.map((c) => `<td>${esc(r && typeof r === "object" ? r[c] ?? "" : r)}</td>`).join("")}</tr>`).join("");
+}
+function markSnippet(snip, value) {
+  const s = esc(snip);
+  if (!value || typeof value !== "string") return s;
+  const v = esc(value), i = s.toLowerCase().indexOf(v.toLowerCase());
+  return i < 0 ? s : s.slice(0, i) + "<mark>" + s.slice(i, i + v.length) + "</mark>" + s.slice(i + v.length);
+}
+const resultsObject = (results) => Object.fromEntries((results || []).map((r) => [r.name, r.value]));
+const fieldRow = (name, results) => ({ document: name, ...Object.fromEntries((results || []).map((r) => [r.name, Array.isArray(r.value) ? JSON.stringify(r.value) : r.value ?? ""])) });
+function toCsv(rows, names) {
+  const cols = ["document", ...names], q = (v) => `"${String(v ?? "").replace(/"/g, '""')}"`;
+  return [cols.map(q).join(","), ...rows.map((r) => cols.map((c) => q(r[c])).join(","))].join("\n");
+}
+function sampleErr(e) {
+  return ({ not_granted: "Claude isn't allowed for this page. Use Quick extract instead.", sampling_disabled: "Claude isn't available for this account.",
+    rate_limited: "Claude is busy or you've hit a usage limit. Try again in a little while.", prompt_too_large: "This document is too long to send in one go.",
+    invalid_json: "Claude's answer couldn't be read. Try again.", cancelled: "Stopped.", session_expired: "Please sign in to Claude again.",
+    refused: "Claude declined this request." })[e?.code] || "Claude couldn't finish. Try again.";
+}
+
+// Number the parsed elements so Claude can cite them; keep within a safe size.
+function promptElements(all, fields, budget = 120000) {
+  const body = all.filter((e) => !FURN.has(e.type) && (e.text || "").trim());
+  const line = (e, n) => {
+    const md = e.metadata, where = md.page_number ? `, p.${md.page_number}` : "";
+    const txt = md.text_as_html ? tableText(md.text_as_html) : e.text.replace(/\s+/g, " ");
+    return `[${n}] (${e.type}${where}) ${txt}`;
+  };
+  let lines = body.map((e, i) => line(e, i + 1)), excerpt = false;
+  if (lines.join("\n").length > budget) {
+    excerpt = true;
+    const words = new Set(fields.flatMap((f) => [f.name, ...(f.aliases || [])]).join(" ").toLowerCase().match(/[a-z0-9]{3,}/g) || []);
+    const scored = body.map((e, i) => {
+      const t = e.text.toLowerCase(); let s = e.type === "Title" ? 2 : 0;
+      words.forEach((w) => { if (t.includes(w)) s += 3; });
+      return { i, s: s + (i < 40 ? 2 : 0) };
+    }).sort((a, b) => b.s - a.s);
+    const keep = new Set(); let size = 0;
+    for (const { i } of scored) { const L = lines[i].length + 1; if (size + L > budget) continue; keep.add(i); size += L; }
+    lines = lines.filter((_, i) => keep.has(i));
+  }
+  return { text: lines.join("\n"), body, excerpt };
+}
+function tableText(html) {
+  return [...html.matchAll(/<tr>(.*?)<\/tr>/gs)].map((m) => [...m[1].matchAll(/<td>(.*?)<\/td>/gs)].map((c) => c[1].replace(/<[^>]+>/g, "")).join(" | ")).join(" // ");
+}
+const normTxt = (s) => String(s || "").toLowerCase().replace(/&amp;/g, "&").replace(/[\s ]+/g, " ").replace(/[“”]/g, '"').replace(/[‘’]/g, "'").trim();
+async function extractWithClaude(all, fields, signal) {
+  const { text, body, excerpt } = promptElements(all, fields);
+  const spec = fields.map((f) => `- "${f.name}" (${FTYPES.find((t) => t[0] === (f.type || "text"))?.[1] || "Text"}${f.aliases?.length ? "; may be labelled " + f.aliases.slice(0, 5).map((a) => `"${a}"`).join(", ") : ""})`).join("\n");
+  const prompt = `You extract fields from a parsed document. The document is given as numbered elements: [number] (element type, page) text. Tables are written as rows separated by " // " and cells by " | ".
+
+Fields to extract:
+${spec}
+
+Rules:
+- Use only what the document says. If a field is not stated, use null. Never guess.
+- For each field give the elements it came from ("sources", element numbers) and "quote": a short exact copy of the text in that element that contains the value.
+- Write values as they appear (keep currency symbols and date formats). For "Table / list" fields, return an array of objects, one per row, using the table's column names.
+- "confidence" is "high", "medium" or "low".
+
+Reply with only JSON in this shape:
+{"fields":[{"name":"<field name exactly as given>","value":<string, array or null>,"sources":[<numbers>],"quote":"<exact text>","confidence":"high"}]}
+${excerpt ? "\nNote: the document is long, so only the most relevant elements are included.\n" : ""}
+Document:
+${text}`;
+  const data = await caps.sample.json(prompt, { signal, modelTier: "default" });
+  const got = Array.isArray(data?.fields) ? data.fields : [];
+  return fields.map((f) => {
+    const g = got.find((x) => normTxt(x?.name) === normTxt(f.name)) || {};
+    const value = g.value === undefined ? null : g.value;
+    const srcs = (Array.isArray(g.sources) ? g.sources : []).map(Number).filter((n) => n >= 1 && n <= body.length).map((n) => body[n - 1]);
+    const quote = normTxt(g.quote), vtxt = typeof value === "string" ? normTxt(value) : "";
+    // Verify: the quote (or the value itself) must really appear in a cited element - else anywhere in the document.
+    const hay = (e) => normTxt(e.metadata.text_as_html ? tableText(e.metadata.text_as_html) : e.text);
+    const hit = (e) => (quote && hay(e).includes(quote)) || (vtxt && vtxt.length >= 2 && hay(e).includes(vtxt));
+    let el = srcs.find(hit), verified = !!el;
+    if (!el && value != null) { el = body.find(hit); verified = !!el; }
+    el ||= srcs[0];
+    const isList = Array.isArray(value);
+    return { name: f.name, value: isList && !value.length ? null : value, element_id: el?.element_id || null, page: el?.metadata.page_number || null,
+      snippet: el ? (g.quote || el.text).slice(0, 220) : null, verified: isList ? !!el : verified, confidence: g.confidence || null, engine: "claude",
+      note: value != null && !verified && !isList ? "Claude's quote wasn't found in the document. Check this value against the source." : excerpt && value == null ? "Long document: only the most relevant parts were sent, so this may be missed." : null };
+  });
+}
+async function runBatch(engineName) {
+  const X = doc.extraction, fields = X.fields.filter((f) => f.name);
+  const docs = ((await store.all("docs")) || []).filter((d) => d.meta.status === "done");
+  const out = $("#batchOut");
+  if (engineName === "claude" && !caps.sample) engineName = "rules";
+  let stop = false;
+  out.innerHTML = `<div class="card" style="margin-top:12px"><div class="run-row" style="margin:0"><b>All documents</b><span class="muted" id="bMsg"></span><button class="btn small" id="bStop">Stop</button></div><div class="batch-table" id="bTable"></div><div class="btn-row" id="bTools" hidden><button class="btn small" id="bCsv">Download CSV</button><button class="btn small" id="bCopy">Copy CSV</button></div></div>`;
+  const ctl = new AbortController();
+  $("#bStop").onclick = () => { stop = true; ctl.abort(); };
+  const rows = [], low = new Set();
+  const draw = () => {
+    const names = fields.map((f) => f.name);
+    $("#bTable").innerHTML = `<table><tr><th>Document</th>${names.map((n) => `<th>${esc(n)}</th>`).join("")}</tr>${rows.map((r, i) => `<tr><td>${esc(r.document)}</td>${names.map((n) => `<td class="${low.has(i + ":" + n) ? "low" : ""}">${esc(String(r[n] ?? "").slice(0, 80))}</td>`).join("")}</tr>`).join("")}</table>`;
+  };
+  for (const [k, d] of docs.entries()) {
+    if (stop) break;
+    $("#bMsg").textContent = `${k + 1} of ${docs.length}: ${d.meta.filename}`;
+    try {
+      const res = engineName === "claude" ? await extractWithClaude(d.result.elements, fields, ctl.signal)
+        : JSON.parse(await engine.extract(JSON.stringify(d.result.elements), fields)).map((r) => ({ ...r, engine: "rules" }));
+      rows.push(fieldRow(d.meta.filename, res));
+      res.forEach((r) => { if (r.value != null && (r.engine === "claude" ? !r.verified : r.confidence < 0.75)) low.add(rows.length - 1 + ":" + r.name); });
+    } catch (e) { if (e?.code === "cancelled") break; rows.push({ document: d.meta.filename + " (failed)" }); }
+    draw();
+  }
+  $("#bMsg").textContent = `${rows.length} document${rows.length === 1 ? "" : "s"}${low.size ? " · amber values need checking" : ""}`;
+  $("#bStop").hidden = true; $("#bTools").hidden = false;
+  const csv = toCsv(rows, fields.map((f) => f.name));
+  $("#bCsv").onclick = () => offerDownload(`${X.template.replace(/^my:/, "")}-fields.csv`, csv);
+  $("#bCopy").onclick = () => copyText(csv, "Copied CSV");
+}
+
 function wilson(k, n, z = 1.96) { if (!n) return [0, 0]; const p = k / n, d = 1 + (z * z) / n, c = p + (z * z) / (2 * n), m = z * Math.sqrt((p * (1 - p)) / n + (z * z) / (4 * n * n)); return [Math.max(0, (c - m) / d), Math.min(1, (c + m) / d)]; }
 function viewValidate() {
   const v = doc.result.validation, reviews = doc.reviews || {}, rv = Object.values(reviews).filter((r) => r.verdict);
@@ -726,10 +1013,10 @@ function refreshValidate() { if (location.hash.endsWith("-validate")) { main.rep
 function viewExport() {
   const opts = [["json", "JSON", "unstructured-compatible element list"], ["jsonl", "JSONL", "one element per line"], ["csv", "CSV", "for spreadsheets"],
     ["markdown", "Markdown", "headings, lists and tables"], ["bigquery", "BigQuery rows", "NDJSON for the BigQuery schema"], ["reviews", "Your reviews", "your labels, as an answer key"]];
-  const grid = h(`<div class="export-grid"></div>`), out = h(`<div class="export-out" hidden><div class="btn-row" style="margin:0"><button class="btn primary" id="copyOut">Copy</button><span class="muted" id="outInfo" style="align-self:center;font-size:13px"></span></div><textarea id="outText" readonly aria-label="Export output"></textarea></div>`);
+  const grid = h(`<div class="export-grid"></div>`), out = h(`<div class="export-out" hidden><div class="btn-row" style="margin:0"><button class="btn primary" id="copyOut">Copy</button><button class="btn" id="dlOut" hidden>Download</button><span class="muted" id="outInfo" style="align-self:center;font-size:13px"></span></div><textarea id="outText" readonly aria-label="Export output"></textarea></div>`);
   opts.forEach(([f, label, desc]) => { const b = h(`<button class="btn${ui.exportFmt === f ? " on" : ""}" data-f="${f}"><b>${label}</b><small>${desc}</small></button>`); b.onclick = () => show(f); grid.append(b); });
   const del = h(`<div class="btn-row" style="margin-top:18px"><button class="btn bad" id="del">Delete from this device</button></div>`);
-  main.append(h(`<p class="muted" style="margin-top:0">Pick a format, then copy the result into a file or another app.</p>`), grid, out, del);
+  main.append(h(`<p class="muted" style="margin-top:0">Pick a format, then ${caps.downloads ? "download it or " : ""}copy it into another app.</p>`), grid, out, del);
   async function show(f) {
     ui.exportFmt = f; grid.querySelectorAll("button").forEach((b) => b.classList.toggle("on", b.dataset.f === f));
     out.hidden = false; $("#outText").value = "Preparing…";
@@ -737,6 +1024,8 @@ function viewExport() {
       const text = await engine.export(JSON.stringify(els()), f, JSON.stringify(doc.reviews || {}), doc.meta.filename);
       $("#outText").value = text; $("#outInfo").textContent = `${text.length.toLocaleString()} characters`;
       $("#copyOut").onclick = () => copyText(text, "Copied", $("#outText"));
+      const ext = { json: "json", jsonl: "jsonl.txt", csv: "csv", markdown: "md", bigquery: "bigquery.jsonl.txt", reviews: "reviews.json" }[f];
+      $("#dlOut").hidden = !caps.downloads; $("#dlOut").onclick = () => offerDownload(`${baseName()}.${ext}`, text);
     } catch (e) { $("#outText").value = e.message; }
   }
   if (ui.exportFmt) show(ui.exportFmt);

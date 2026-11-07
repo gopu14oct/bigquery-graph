@@ -294,6 +294,21 @@ def make_chunks(doc_id: str, req: ChunkReq):
                       "min": min(sizes, default=0)}}
 
 
+class ExtractReq(BaseModel):
+    fields: list[dict]
+
+
+@app.post("/api/docs/{doc_id}/extract")
+def extract_fields(doc_id: str, req: ExtractReq):
+    """Quick (rule-based) field extraction from the parsed elements."""
+    from app.extract import extract
+
+    res = read_json(os.path.join(ddir(doc_id), "result.json"))
+    if not res:
+        raise HTTPException(409, "document not parsed yet")
+    return {"results": extract(res["elements"], req.fields)}
+
+
 @app.get("/api/capabilities")
 def capabilities():
     return {"compare": bool(UNSTRUCTURED_PY and os.path.exists(UNSTRUCTURED_PY)),

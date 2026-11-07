@@ -69,7 +69,7 @@ def pylib() -> bytes:
                         p = os.path.join(dp, f)
                         z.write(p, os.path.relpath(p, REPO))
         z.writestr("app/__init__.py", "")
-        for f in ("exporters.py", "validate.py"):
+        for f in ("exporters.py", "validate.py", "extract.py"):
             z.write(os.path.join(REPO, "app", f), f"app/{f}")
         z.write(os.path.join(HERE, "studio.py"), "studio.py")
         stubs = os.path.join(HERE, "stubs")
