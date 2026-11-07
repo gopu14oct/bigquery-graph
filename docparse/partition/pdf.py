@@ -41,6 +41,7 @@ from docparse.elements import (
     ListItem,
     PageBreak,
     Table,
+    Text,
     Title,
     UncategorizedText,
 )
@@ -107,6 +108,232 @@ def _is_bold(fontname: str) -> bool:
     return any(k in f for k in ("bold", "black", "heavy", "semibold", "demi"))
 
 
+def _wh(w: dict) -> float:
+    return max(w["bottom"] - w["top"], 0.1)
+
+
+def _bands(words: list[dict]) -> list[list[dict]]:
+    """Group words whose vertical centres agree into horizontal bands (any x)."""
+    ws = sorted(words, key=lambda w: (w["top"] + w["bottom"]) / 2)
+    bands: list[list[dict]] = []
+    band_cy: list[float] = []
+    for w in ws:
+        cy = (w["top"] + w["bottom"]) / 2
+        if bands and abs(cy - band_cy[-1]) <= 0.5 * min(_wh(w), statistics.median(_wh(x) for x in bands[-1])):
+            bands[-1].append(w)
+            band_cy[-1] = statistics.median((x["top"] + x["bottom"]) / 2 for x in bands[-1])
+        else:
+            bands.append([w]); band_cy.append(cy)
+    for b in bands:
+        b.sort(key=lambda w: w["x0"])
+    return bands
+
+
+def _segments(band: list[dict], factor: float = 1.2) -> list[list[dict]]:
+    segs: list[list[dict]] = []
+    cur: list[dict] = []
+    for w in band:
+        if cur:
+            size = min(float(w.get("size", _wh(w))), float(cur[-1].get("size", _wh(cur[-1]))))
+            if w["x0"] - cur[-1]["x1"] > size * factor:
+                segs.append(cur); cur = []
+        cur.append(w)
+    if cur:
+        segs.append(cur)
+    return segs
+
+
+_NUM_TOKEN_RE = re.compile(r"^[-+(]?[\d.,]+%?\)?$")
+
+
+def clean_grid(rows: list[list[str]]) -> list[list[str]]:
+    """Drop rows and columns that are empty everywhere (artefacts of partial rulings)."""
+    rows = [r for r in rows if any(r)]
+    if not rows:
+        return rows
+    width = max(len(r) for r in rows)
+    rows = [r + [""] * (width - len(r)) for r in rows]
+    keep = [c for c in range(width) if any(r[c] for r in rows)]
+    return [[r[c] for c in keep] for r in rows]
+
+
+def grid_is_broken(rows: list[list[str]]) -> bool:
+    """A ruled grid whose cells hold several separate numbers did not really find the
+    cell boundaries (rulings only on some rows/columns): better re-detect from text
+    alignment."""
+    cells = [c for r in rows for c in r if c]
+    if not cells:
+        return True
+    merged = sum(1 for c in cells if sum(1 for t in c.split() if _NUM_TOKEN_RE.match(t)) >= 3)
+    return merged / len(cells) > 0.15
+
+
+def page_rotation(page, threshold: float = 0.6) -> int:
+    """90 / -90 if most glyphs on the page are rotated (sideways page), else 0."""
+    chars = [c for c in page.chars if c["text"].strip()]
+    if len(chars) < 20:
+        return 0
+    rot = [c for c in chars if not c.get("upright", True) and c.get("matrix")]
+    if len(rot) / len(chars) < threshold:
+        return 0
+    ccw = sum(1 for c in rot if c["matrix"][1] > 0)
+    return 90 if ccw >= len(rot) / 2 else -90
+
+
+def rotated_words(page, rotation: int) -> list[dict]:
+    """Words of a sideways page, in a frame where its text reads left-to-right.
+
+    90  (text reads bottom-to-top): x' = H - y, y' = x
+    -90 (text reads top-to-bottom): x' = y,     y' = W - x
+    """
+    from pdfplumber.utils import extract_words
+
+    W, H = float(page.width), float(page.height)
+    chars = []
+    for c in page.chars:
+        if c.get("upright", True):
+            continue
+        d = dict(c)
+        if rotation == 90:
+            d.update(x0=H - c["bottom"], x1=H - c["top"], top=c["x0"], bottom=c["x1"])
+        else:
+            d.update(x0=c["top"], x1=c["bottom"], top=W - c["x1"], bottom=W - c["x0"])
+        d["upright"] = True
+        d["doctop"] = d["top"]
+        # pdfminer reports a rotated glyph's "size" as its advance; the real font size
+        # is the scale of its text matrix.
+        if c.get("matrix"):
+            a, b = c["matrix"][0], c["matrix"][1]
+            d["size"] = (a * a + b * b) ** 0.5
+        chars.append(d)
+    chars.sort(key=lambda c: (round(c["top"]), c["x0"]))
+    return extract_words(chars, extra_attrs=["size", "fontname"], x_tolerance=3, x_tolerance_ratio=0.15,
+                         keep_blank_chars=False, use_text_flow=False)
+
+
+def find_borderless_tables(words: list[dict], min_rows: int = 3, min_cols: int = 3) -> tuple[list, list[dict]]:
+    """Tables without ruling lines, found from text alignment alone.
+
+    1. Lines (bands) that split into >= ``min_cols`` segments at wide gaps are
+       candidate rows; runs of >= ``min_rows`` such rows, vertically close, form a
+       candidate table.
+    2. Column spans = union of the segments' x-intervals across the candidate rows.
+       The candidate is accepted only if the rows agree: most segments fall inside
+       exactly one span, and no span is fed by a single row.
+    3. The table grows up/down over adjacent lines whose segments all fit inside the
+       spans (header rows, rows with empty cells).
+    Returns ([(bbox, rows)], remaining words).
+    """
+    bands = _bands(words)
+    segs = [_segments(b) for b in bands]
+    size = [statistics.median(float(w.get("size", _wh(w))) for w in b) for b in bands]
+    used: set[int] = set()
+    tables = []
+    i = 0
+    while i < len(bands):
+        if len(segs[i]) < min_cols:
+            i += 1
+            continue
+        j = i
+        while (j + 1 < len(bands) and len(segs[j + 1]) >= min_cols
+               and bands[j + 1][0]["top"] - max(w["bottom"] for w in bands[j]) < 2.5 * size[j]):
+            j += 1
+        if j - i + 1 < min_rows:
+            i = j + 1
+            continue
+        spans = _column_spans([s for k in range(i, j + 1) for s in segs[k]])
+        if len(spans) < min_cols or not _rows_agree(segs[i:j + 1], spans):
+            i = j + 1
+            continue
+        # grow over header / sparse rows that fit the column grid
+        lo, hi = i, j
+        while lo - 1 >= 0 and len(segs[lo - 1]) >= 2 and _fits(segs[lo - 1], spans) \
+                and bands[lo][0]["top"] - max(w["bottom"] for w in bands[lo - 1]) < 2.5 * size[lo]:
+            lo -= 1
+        while hi + 1 < len(bands) and len(segs[hi + 1]) >= 2 and _fits(segs[hi + 1], spans) \
+                and bands[hi + 1][0]["top"] - max(w["bottom"] for w in bands[hi]) < 2.5 * size[hi]:
+            hi += 1
+        rows = []
+        for k in range(lo, hi + 1):
+            row = [""] * len(spans)
+            for seg in segs[k]:
+                c = _span_of(seg, spans)
+                row[c] = (row[c] + " " + " ".join(w["text"] for w in seg)).strip()
+            rows.append(row)
+            used.update(id(w) for w in bands[k])
+        allw = [w for k in range(lo, hi + 1) for w in bands[k]]
+        bbox = (min(w["x0"] for w in allw), min(w["top"] for w in allw), max(w["x1"] for w in allw), max(w["bottom"] for w in allw))
+        prev = tables[-1] if tables else None
+        if prev is not None and prev[2] == len(spans) and lo - prev[3] - 1 <= 3 and _spans_match(prev[4], spans) \
+                and all(len(segs[k]) >= 1 and _fits(segs[k], spans) for k in range(prev[3] + 1, lo)):
+            # same column grid, interrupted only by a few one-cell rows (category
+            # headings inside the table): one table, not two
+            mid = []
+            for k in range(prev[3] + 1, lo):
+                row = [""] * len(spans)
+                for seg in segs[k]:
+                    c = _span_of(seg, spans)
+                    row[c] = (row[c] + " " + " ".join(w["text"] for w in seg)).strip()
+                mid.append(row)
+                used.update(id(w) for w in bands[k])
+            pb = prev[0]
+            bbox = (min(pb[0], bbox[0]), min(pb[1], bbox[1]), max(pb[2], bbox[2]), max(pb[3], bbox[3]))
+            tables[-1] = (bbox, prev[1] + mid + rows, len(spans), hi, spans)
+        else:
+            tables.append((bbox, rows, len(spans), hi, spans))
+        i = hi + 1
+    return [(t[0], t[1]) for t in tables], [w for w in words if id(w) not in used]
+
+
+def _spans_match(a, b, tol: float = 6.0) -> bool:
+    """Two column grids describe the same table if most columns overlap."""
+    hits = sum(1 for (x0, x1) in a if any(min(x1, y1) - max(x0, y0) > -tol for (y0, y1) in b))
+    return hits >= 0.8 * max(len(a), len(b))
+
+
+def _column_spans(seglist: list[list[dict]]) -> list[tuple[float, float]]:
+    iv = sorted((s[0]["x0"], max(w["x1"] for w in s)) for s in seglist)
+    spans: list[list[float]] = []
+    for a, b in iv:
+        if spans and a <= spans[-1][1] + 1:
+            spans[-1][1] = max(spans[-1][1], b)
+        else:
+            spans.append([a, b])
+    return [(a, b) for a, b in spans]
+
+
+def _span_of(seg: list[dict], spans) -> int:
+    a, b = seg[0]["x0"], max(w["x1"] for w in seg)
+    best = max(range(len(spans)), key=lambda k: min(b, spans[k][1]) - max(a, spans[k][0]))
+    return best
+
+
+def _fits(segs_row: list[list[dict]], spans) -> bool:
+    hit = set()
+    for seg in segs_row:
+        a, b = seg[0]["x0"], max(w["x1"] for w in seg)
+        inside = [k for k, (x0, x1) in enumerate(spans) if a >= x0 - 2 and b <= x1 + 2]
+        if len(inside) != 1 or inside[0] in hit:
+            return False
+        hit.add(inside[0])
+    return True
+
+
+def _rows_agree(rows: list[list[list[dict]]], spans) -> bool:
+    fed = [0] * len(spans)
+    ok = total = 0
+    for segs_row in rows:
+        seen = set()
+        for seg in segs_row:
+            total += 1
+            k = _span_of(seg, spans)
+            if k not in seen:
+                ok += 1
+                seen.add(k)
+                fed[k] += 1
+    return total > 0 and ok / total >= 0.9 and min(fed) >= 2
+
+
 def words_to_lines(words: list[dict]) -> list[Line]:
     """Group words into lines.
 
@@ -120,32 +347,67 @@ def words_to_lines(words: list[dict]) -> list[Line]:
         return []
     def h(w):
         return max(w["bottom"] - w["top"], 0.1)
-    ws = sorted(words, key=lambda w: (w["top"] + w["bottom"]) / 2)
-    bands: list[list[dict]] = []
-    band_cy: list[float] = []
-    for w in ws:
-        cy = (w["top"] + w["bottom"]) / 2
-        if bands and abs(cy - band_cy[-1]) <= 0.5 * min(h(w), statistics.median(h(x) for x in bands[-1])):
-            bands[-1].append(w)
-            band_cy[-1] = statistics.median((x["top"] + x["bottom"]) / 2 for x in bands[-1])
-        else:
-            bands.append([w]); band_cy.append(cy)
+    bands = _bands(words)
     lines: list[Line] = []
+    band_segments: list[list[list[dict]]] = []
     for band in bands:
         band.sort(key=lambda w: w["x0"])
+        segs: list[list[dict]] = []
         cur: list[dict] = []
         for w in band:
             if cur:
                 size = min(float(w.get("size", h(w))), float(cur[-1].get("size", h(cur[-1]))))
-                if w["x0"] - cur[-1]["x1"] > size * 1.2:
-                    lines.append(_make_line(cur)); cur = []
+                gap = w["x0"] - cur[-1]["x1"]
+                # a section number ("1", "2.3", "A.") stays with the heading text after its tab
+                numbering = len(cur) == 1 and SECTION_NUM_RE.match(cur[0]["text"]) and gap < size * 6
+                if gap > size * 1.2 and not numbering:
+                    segs.append(cur); cur = []
             cur.append(w)
         if cur:
-            lines.append(_make_line(cur))
+            segs.append(cur)
+        band_segments.append(segs)
+    _join_label_value_rows(band_segments)
+    for segs in band_segments:
+        for seg in segs:
+            lines.append(_make_line(seg))
     lines = _attach_bullet_glyphs(lines)
     for ln in lines:
         ln.words.sort(key=lambda w: w["x0"])
     return lines
+
+
+TOC_LEADER_RE = re.compile(r"(?:\.\s?){4,}\s*[\divxlc]*\s*$", re.I)
+SECTION_NUM_RE = re.compile(r"^(?:\d{1,2}(?:\.\d{1,2}){0,4}\.?|[A-Z]\.|[IVX]{1,4}\.)$")
+
+
+def _join_label_value_rows(band_segments: list[list[list[dict]]], min_rows: int = 3) -> None:
+    """Abbreviation lists, glossaries and form-like "Label   value" rows: two text
+    segments per line, a short label at a consistent x and the value at another
+    consistent x. When at least ``min_rows`` lines share that geometry, each label is
+    joined with its value into one line (so XY-cut does not read them as columns).
+    Body text in two columns is unaffected: its left segments are long."""
+    key_rows: dict[tuple[int, int], list[int]] = {}
+    for i, segs in enumerate(band_segments):
+        if len(segs) == 2 and len(segs[0]) <= 4 and not BULLETS_RE.match(segs[0][0]["text"] + " "):
+            key = (round(segs[0][0]["x0"] / 3), round(segs[1][0]["x0"] / 3))
+            key_rows.setdefault(key, []).append(i)
+    for rows in key_rows.values():
+        # only *consecutive* label/value lines form a list; isolated coincidences (a short
+        # last line of a left-column paragraph beside right-column text) do not
+        runs: list[list[int]] = []
+        for i in rows:
+            if runs and i - runs[-1][-1] == 1:
+                runs[-1].append(i)
+            else:
+                runs.append([i])
+        for run in runs:
+            if len(run) < min_rows:
+                continue
+            for i in run:
+                joined = band_segments[i][0] + band_segments[i][1]
+                for w in joined:
+                    w["_row"] = True  # each label/value row is its own block
+                band_segments[i] = [joined]
 
 
 def _make_line(ws: list[dict]) -> Line:
@@ -217,20 +479,30 @@ def _continues(block: Block, ln: Line, lead: float) -> bool:
         return False
     if abs(ln.size - last.size) > 0.6 or ln.bold != last.bold or _starts_item(ln.text):
         return False
+    if ln.words[0].get("_row") or last.words[0].get("_row"):
+        return False
     first = block.lines[0]
+    # Deliberate line break test: if the next line's first word would have fitted in
+    # the space left on this line, the writer ended the block here.
+    right_edge = max(l.x1 for l in block.lines)
+    first_word = ln.words[0]["x1"] - ln.words[0]["x0"]
+    short_last = len(block.lines) > 1 and right_edge - last.x1 > first_word + 0.5 * ln.size
     if _starts_item(first.text):
-        # wrapped lines of a list item hang at the item's text indent
-        return ln.x0 >= _text_start(first) - 3
+        # Wrapped lines of a list item either hang at the item's text indent, or (common
+        # in numbered references) return to the item's own left edge.
+        if ln.x0 >= _text_start(first) - 3:
+            return True
+        return ln.x0 >= first.x0 - 3 and not short_last and not (len(block.lines) == 1 and _ends_short(first, ln))
     if last.text.rstrip().endswith(_SENT_END):
-        # Deliberate line break test: if the next line's first word would have fitted
-        # in the space left on this line, the writer ended the paragraph here.
-        right_edge = max(l.x1 for l in block.lines)
-        first_word = ln.words[0]["x1"] - ln.words[0]["x0"]
-        short_last = right_edge - last.x1 > first_word + 0.5 * ln.size
         indented = ln.x0 > min(l.x0 for l in block.lines) + 0.8 * ln.size
         if short_last or indented:
             return False
     return True
+
+
+def _ends_short(line: Line, nxt: Line) -> bool:
+    """Single-line item whose text stops well before the next line's right edge."""
+    return nxt.x1 - line.x1 > (nxt.words[0]["x1"] - nxt.words[0]["x0"]) + 0.5 * nxt.size
 
 
 def lines_to_blocks(lines: list[Line], lead: Optional[float] = None) -> list[Block]:
@@ -441,6 +713,7 @@ def partition_pdf(
     include_headers_footers: bool = True,
     unique_element_ids: bool = False,
     margin_ratio: float = 0.08,
+    repeat_band: float = 0.15,
     ocr: str = "auto",
     ocr_languages: str = "eng",
     strategy: Optional[str] = None,
@@ -479,15 +752,23 @@ def partition_pdf(
             tables = []
             if infer_table_structure:
                 for t in page.find_tables():
-                    rows = [[clean_extra_whitespace(c or "") for c in r] for r in t.extract()]
-                    rows = [r for r in rows if any(r)]
-                    if rows and len(rows[0]) > 1:
+                    rows = clean_grid([[clean_extra_whitespace(c or "") for c in r] for r in t.extract()])
+                    if rows and len(rows[0]) > 1 and not grid_is_broken(rows):
                         tables.append((t.bbox, rows))
             any_ocr_page = False
             # A gap wider than 15% of the font size separates words. A fixed tolerance
             # (pdfplumber's default 3pt) glues words in tightly-set justified text.
             words = page.extract_words(extra_attrs=["size", "fontname"], keep_blank_chars=False, use_text_flow=False,
                                        x_tolerance=3, x_tolerance_ratio=0.15)
+            rotation = page_rotation(page)
+            page_w, page_h = float(page.width), float(page.height)
+            if rotation:
+                # Sideways page (landscape table printed on a portrait page): rotate every
+                # glyph back into a normal reading frame and run the usual pipeline there.
+                # Coordinates in metadata are then in that rotated frame.
+                words = rotated_words(page, rotation)
+                tables = []  # ruled-grid cells would be read sideways; rely on alignment
+                page_w, page_h = page_h, page_w
             if ocr != "never" and (ocr == "always" or page_needs_ocr(page, words)) and tesseract_available():
                 words, ocr_tables = ocr_page(page, lang=ocr_languages)
                 tables = ocr_tables if infer_table_structure else []
@@ -500,14 +781,21 @@ def partition_pdf(
 
             words = [dict(w, text=clean_ligatures(_fix_cids(w["text"]))) for w in words if not in_table(w)]
             words = [w for w in words if w["text"].strip()]
+            if infer_table_structure:
+                upright_words = [w for w in words if w.get("upright", True)]
+                text_tables, rest = find_borderless_tables(upright_words)
+                if text_tables:
+                    keep = {id(w) for w in rest}
+                    words = [w for w in words if not w.get("upright", True) or id(w) in keep]
+                tables = tables + text_tables
             # Rotated text (arXiv side stamps, rotated table headers, axis labels) would
             # otherwise become one-character "lines"; keep it out of the main flow and
             # emit each vertical run as a single element.
             vertical = [w for w in words if not w.get("upright", True)]
             words = [w for w in words if w.get("upright", True)]
             blocks = lines_to_blocks(words_to_lines(words))
-            pages.append({"no": pno, "w": float(page.width), "h": float(page.height), "blocks": blocks, "tables": tables,
-                          "vertical": _vertical_runs(page) if vertical else [],
+            pages.append({"no": pno, "w": page_w, "h": page_h, "blocks": blocks, "tables": tables,
+                          "vertical": _vertical_runs(page) if vertical and not rotation else [],
                           "images": [] if any_ocr_page else _page_images(page)})
             page.close()  # release pdfminer's cached layout objects: keeps memory flat on long documents
     if base.last_modified is None and isinstance(info_mod, str):
@@ -526,7 +814,7 @@ def partition_pdf(
         n = len(text.split())
         if not text or n > 20 or text.endswith(".") or _starts_item(text):
             return False
-        if URL_RE.search(text) or EMAIL_IN_TEXT_RE.search(text):
+        if URL_RE.search(text) or EMAIL_IN_TEXT_RE.search(text) or TOC_LEADER_RE.search(text) or is_page_number(text):
             return False
         if b.size >= body_size * 1.15:
             return True
@@ -550,7 +838,7 @@ def partition_pdf(
     for pg in pages:
         seen = set()
         for b in pg["blocks"]:
-            if b.bottom < pg["h"] * margin_ratio or b.top > pg["h"] * (1 - margin_ratio):
+            if b.bottom < pg["h"] * repeat_band or b.top > pg["h"] * (1 - repeat_band):
                 seen.add(_norm_furniture(b.text))
         furniture.update(seen)
     min_repeat = max(2, int(len(pages) * 0.5))
@@ -579,14 +867,23 @@ def partition_pdf(
             bbox = (b.x0, b.top, b.x1, b.bottom)
             in_top = b.bottom < pg["h"] * margin_ratio
             in_bottom = b.top > pg["h"] * (1 - margin_ratio)
+            # Running heads can sit lower than the tight margin band; exact repetition
+            # across most pages is strong evidence, so allow a wider band for it.
+            rep_top = b.bottom < pg["h"] * repeat_band
+            rep_bottom = b.top > pg["h"] * (1 - repeat_band)
+            repeated = furniture[_norm_furniture(text)] >= min_repeat and len(text.split()) <= 25
             # Furniture: margin text that repeats across pages, is a page number, or (for
             # documents too short to show repetition) is a short line set smaller than body.
             small_margin_note = b.size < body_size - 0.9 and len(text.split()) <= 12 and len(b.lines) == 1
-            if (in_top or in_bottom) and (furniture[_norm_furniture(text)] >= min_repeat or is_page_number(text)
-                                          or small_margin_note):
+            if ((rep_top or rep_bottom) and repeated) or ((in_top or in_bottom) and (is_page_number(text) or small_margin_note)):
+                in_top = in_top or rep_top
                 if include_headers_footers:
                     cls = Header if in_top else Footer
                     items.append((b.top, b.x0, cls(text, md(bbox))))
+                continue
+            is_row = bool(b.lines[0].words[0].get("_row"))
+            if is_row:
+                items.append((b.top, b.x0, Text(text, md(bbox))))
                 continue
             if heading_candidate(b):
                 m = md(bbox); m.category_depth = level_of[round(b.size * 2) / 2]

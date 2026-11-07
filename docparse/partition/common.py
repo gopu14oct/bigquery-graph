@@ -7,7 +7,7 @@ import os
 from typing import IO, Optional, Union
 
 from docparse import text_type as tt
-from docparse.cleaners import clean_bullets, clean_extra_whitespace, clean_ordered_bullets
+from docparse.cleaners import clean_bullets, clean_extra_whitespace
 from docparse.elements import (
     Address,
     Element,
@@ -32,7 +32,9 @@ def classify_text(text: str, metadata: Optional[ElementMetadata] = None) -> Opti
     if not raw:
         return None
     if tt.is_bulleted_text(raw):
-        cleaned = clean_bullets(raw) if tt.BULLETS_RE.match(raw) else clean_ordered_bullets(raw)
+        # Bullet glyphs carry no information and are removed; list *numbers* ("124.",
+        # "(b)") are kept because other text refers to them (citations, cross-refs).
+        cleaned = clean_bullets(raw) if tt.BULLETS_RE.match(raw) else raw
         return ListItem(text=clean_extra_whitespace(cleaned), metadata=md)
     text = clean_extra_whitespace(raw)
     if tt.is_email_address(text):

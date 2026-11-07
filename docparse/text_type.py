@@ -37,7 +37,7 @@ ADDRESS_RE = re.compile(
 )
 ENDS_IN_PUNCT_RE = re.compile(r"[.!?,;:]\s*$")
 SENTENCE_END_RE = re.compile(r"[.!?](?:[\"')\]]+)?(?:\s|$)")
-PAGE_NUMBER_RE = re.compile(r"^\s*(?:page\s+)?\d{1,4}(?:\s*(?:/|of)\s*\d{1,4})?\s*$", re.IGNORECASE)
+PAGE_NUMBER_RE = re.compile(r"^\s*(?:page\s+)?(?:\d{1,4}(?:\s*(?:/|of)\s*\d{1,4})?|[ivxlc]{1,6})\s*$", re.IGNORECASE)
 
 # Small closed-class word list used as a cheap "does this look like a sentence" signal.
 _FUNCTION_WORDS = frozenset(

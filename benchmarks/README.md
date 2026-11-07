@@ -1,5 +1,7 @@
 # Benchmark: docparse vs. unstructured (open source)
 
+> **Real documents:** see [REALWORLD.md](REALWORLD.md) (1,480 real pages, PDF-tag and camelot answer keys). It is the more realistic picture: docparse still leads on text completeness, speed, memory and tables, but heading depth and hierarchy on real documents are weak for **both** parsers (about 0.1), far below the synthetic numbers below.
+
 ## TL;DR (held-out test set, 20 documents × 6 formats)
 
 | metric (higher is better unless noted) | docparse | unstructured 0.27.37 |

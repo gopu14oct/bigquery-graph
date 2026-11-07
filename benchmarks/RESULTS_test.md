@@ -60,7 +60,7 @@
 | order | **1.000** | 0.999 |
 | table_cells | **0.958** | 0.000 |
 | furniture_leak | 0.000 | 0.000 |
-| sec/doc | **0.126** | 0.181 |
+| sec/doc | **0.121** | 0.181 |
 | errors | 0 | 0 |
 
 ### pdf2col
@@ -76,7 +76,7 @@
 | order | 1.000 | 1.000 |
 | table_cells | **0.934** | 0.000 |
 | furniture_leak | 0.000 | 0.000 |
-| sec/doc | **0.115** | 0.184 |
+| sec/doc | **0.126** | 0.184 |
 | errors | 0 | 0 |
 
 ### scanned
@@ -92,7 +92,7 @@
 | order | 1.000 | 1.000 |
 | table_cells | **0.935** | 0.000 |
 | furniture_leak | **0.000** | 1.000 |
-| sec/doc | **5.678** | 13.810 |
+| sec/doc | **5.540** | 13.810 |
 | errors | 0 | 0 |
 
 ### ALL
@@ -108,5 +108,5 @@
 | order | **1.000** | 1.000 |
 | table_cells | **0.971** | 0.500 |
 | furniture_leak | **0.000** | 0.167 |
-| sec/doc | **0.990** | 2.400 |
+| sec/doc | **0.968** | 2.400 |
 | errors | 0 | 0 |
