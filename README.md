@@ -24,3 +24,14 @@ Before running the tutorial, ensure you have the following:
 4. **Google Cloud SDK:** Installed and authenticated.
    ```bash
    gcloud auth application-default login
+
+## 📄 docparse: document parser that feeds BigQuery
+
+[`docparse/`](docparse/README.md) is a from-scratch, Unstructured.io-style document partitioner and chunker.
+It reads PDF, DOCX, PPTX, XLSX, HTML, Markdown, EML, EPUB, CSV/TSV and plain text, and returns typed elements
+with `parent_id` hierarchy. It can stage them as BigQuery rows, ready to model as a property graph.
+
+```bash
+pip install -e ".[pdf]"
+docparse report.pdf --chunking-strategy by_title --format bigquery -o rows.jsonl
+```
