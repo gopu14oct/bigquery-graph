@@ -168,6 +168,96 @@ def grid_is_broken(rows: list[list[str]]) -> bool:
     return merged / len(cells) > 0.15
 
 
+def _inside(w: dict, bbox) -> bool:
+    x0, top, x1, bottom = bbox
+    cx, cy = (w["x0"] + w["x1"]) / 2, (w["top"] + w["bottom"]) / 2
+    return x0 - 1 <= cx <= x1 + 1 and top - 1 <= cy <= bottom + 1
+
+
+_DA_RE = re.compile(rb"/([^\s/]+)\s+([\d.]+)\s+Tf")
+
+
+def form_field_words(page, existing: list[dict]) -> list[dict]:
+    """Words for the values of filled-in form fields (text and choice widgets).
+
+    Their text is not part of the page content stream, so text extraction misses it.
+    Each value is laid out inside its widget rectangle using the field's own font
+    size (from /DA), so it joins the normal layout analysis (reading order, blocks,
+    label/value pairing). Values already printed in the page text (flattened forms)
+    are skipped.
+    """
+    try:
+        annots = page.annots or []
+    except Exception:  # noqa: BLE001 - malformed annotation arrays
+        return []
+    if not annots:
+        return []
+    from pdfminer.pdftypes import resolve1
+    from pdfminer.utils import decode_text
+
+    def name(v):
+        v = resolve1(v)
+        return getattr(v, "name", v.decode("latin-1") if isinstance(v, bytes) else v)
+
+    def inherited(d, key):
+        seen = 0
+        while d is not None and seen < 10:
+            if key in d:
+                return resolve1(d[key])
+            d = resolve1(d.get("Parent")) if isinstance(resolve1(d.get("Parent")), dict) else None
+            seen += 1
+        return None
+
+    out: list[dict] = []
+    for a in annots:
+        d = a.get("data") or {}
+        if name(d.get("Subtype")) != "Widget":
+            continue
+        ft = name(inherited(d, "FT"))
+        if ft not in ("Tx", "Ch"):
+            continue
+        v = inherited(d, "V")
+        if isinstance(v, list):
+            v = ", ".join(decode_text(x) if isinstance(x, bytes) else str(name(x)) for x in v)
+        elif isinstance(v, bytes):
+            v = decode_text(v)
+        elif v is not None:
+            v = str(name(v))
+        if not v or not v.strip():
+            continue
+        try:
+            x0, top, x1, bottom = float(a["x0"]), float(a["top"]), float(a["x1"]), float(a["bottom"])
+        except (KeyError, TypeError, ValueError):
+            continue
+        da = inherited(d, "DA") or b""
+        m = _DA_RE.search(da if isinstance(da, bytes) else str(da).encode())
+        font = m.group(1).decode("latin-1") if m else "Helv"
+        size = float(m.group(2)) if m else 0.0
+        lines = [ln for ln in re.split(r"\r\n|\r|\n", v)]
+        if size <= 0:  # auto size
+            size = max(6.0, min(12.0, (bottom - top) / max(1, len(lines)) * 0.7))
+        bold = "bo" in font.lower() or "bold" in font.lower()
+        # skip values already drawn as page text inside the widget (flattened forms)
+        inside = " ".join(w["text"] for w in existing if _inside(w, (x0, top, x1, bottom)))
+        if inside and v.split()[0] in inside:
+            continue
+        lead = size * 1.2
+        y = top + max(1.0, ((bottom - top) - lead * len(lines)) / 2) if len(lines) == 1 else top + 2
+        cw = size * (0.56 if bold else 0.5)  # average glyph advance for Helvetica-like fonts
+        for ln in lines:
+            if ln.strip():
+                x = start = x0 + 2 + (len(ln) - len(ln.lstrip())) * cw
+                for tok in ln.split():
+                    w = len(tok) * cw
+                    if x + w > x1 - 1 and x > start + 1:  # the widget wraps long lines: so do we,
+                        x, y = start, y + lead               # keeping the line's own indent
+                    out.append({"text": tok, "x0": x, "x1": min(x + w, x1), "top": y, "bottom": y + size,
+                                "size": size, "fontname": "FormField-Bold" if bold else "FormField", "upright": True})
+                    x += w + cw * 0.55
+            y += lead
+    return out
+
+
 def page_rotation(page, threshold: float = 0.6) -> int:
     """90 / -90 if most glyphs on the page are rotated (sideways page), else 0."""
     chars = [c for c in page.chars if c["text"].strip()]
@@ -551,7 +641,9 @@ def xy_cut(blocks: list[Block], depth: int = 0) -> list[Block]:
     # A clear vertical gutter means columns: read the left one fully first. Blocks
     # spanning the page (titles, wide tables) remove the gutter at this level, so the
     # horizontal cut separates them first and the columns are split one level down.
-    if vgap and vgap[0] >= 8:
+    # ...unless rows are separated by clearly more whitespace than the "gutter": that is a
+    # form or grid (label row, value row), which reads row by row.
+    if vgap and vgap[0] >= 8 and not (hgap and hgap[0] > 1.5 * vgap[0] and hgap[0] >= 12):
         cut = vgap[1]
         left = [b for b in blocks if b.x1 <= cut]
         right = [b for b in blocks if b.x1 > cut]
@@ -760,6 +852,13 @@ def partition_pdf(
             # (pdfplumber's default 3pt) glues words in tightly-set justified text.
             words = page.extract_words(extra_attrs=["size", "fontname"], keep_blank_chars=False, use_text_flow=False,
                                        x_tolerance=3, x_tolerance_ratio=0.15)
+            # Filled-in form fields (AcroForm) live in annotations, not in the page text:
+            # read their values and place them where they are drawn.
+            field_words = form_field_words(page, words)
+            if field_words:
+                words = words + field_words
+                # a ruled box around form fields is page layout, not a data table
+                tables = [t for t in tables if not any(_inside(w, t[0]) for w in field_words)]
             rotation = page_rotation(page)
             page_w, page_h = float(page.width), float(page.height)
             if rotation:
@@ -855,6 +954,17 @@ def partition_pdf(
 
         items: list[tuple[float, float, Element]] = []
         table_blocks = [TableBlock(x0, top, x1, bottom, rows) for (x0, top, x1, bottom), rows in pg["tables"]]
+        # Several short single-line blocks sharing one baseline with the same style
+        # ("Flight | Class Of Travel | Seat") are a row of form or table labels, never
+        # a heading: real headings do not share their line with siblings.
+        label_rows: set[int] = set()
+        bands: dict[tuple, list] = {}
+        for b in pg["blocks"]:
+            if len(b.lines) == 1 and len(b.text.split()) <= 5 and b.text and not b.text.endswith("."):
+                bands.setdefault((round(b.top), round(b.size), b.bold), []).append(b)
+        for row in bands.values():
+            if len(row) >= 3 or (len(row) == 2 and all(bb.bold for bb in row)):
+                label_rows.update(id(bb) for bb in row)
         for b in xy_cut(pg["blocks"] + table_blocks):
             if isinstance(b, TableBlock):
                 tel = Table(rows_to_text(b.rows), md((b.x0, b.top, b.x1, b.bottom)))
@@ -881,7 +991,16 @@ def partition_pdf(
                     cls = Header if in_top else Footer
                     items.append((b.top, b.x0, cls(text, md(bbox))))
                 continue
-            is_row = bool(b.lines[0].words[0].get("_row"))
+            is_field = all(str(w.get("fontname", "")).startswith("FormField") for ln in b.lines for w in ln.words)
+            if is_field:
+                # a filled-in form value: never a heading, whatever its font size
+                el = classify_text(text, md(bbox))
+                if isinstance(el, Title):
+                    el = Text(text, el.metadata)
+                if el is not None:
+                    items.append((b.top, b.x0, el))
+                continue
+            is_row = bool(b.lines[0].words[0].get("_row")) or id(b) in label_rows
             if is_row:
                 items.append((b.top, b.x0, Text(text, md(bbox))))
                 continue

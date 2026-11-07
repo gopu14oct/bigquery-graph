@@ -96,9 +96,66 @@ def _grid(el: dict) -> list[list[str]]:
     return [[_html.unescape(re.sub(r"<[^>]+>", "", c)).strip() for c in re.findall(r"<t[dh][^>]*>(.*?)</t[dh]>", r, re.S)] for r in rows]
 
 
+def _box(el: dict):
+    c = el["metadata"].get("coordinates")
+    if not c:
+        return None
+    xs = [p[0] for p in c["points"]]
+    ys = [p[1] for p in c["points"]]
+    return min(xs), min(ys), max(xs), max(ys)
+
+
+def _value_below(label_el: dict, elements: list[dict]) -> Optional[dict]:
+    """Forms often print a short label with its value directly underneath
+    ("Flight" over "QR 0517"). Return that value element, if any."""
+    t = label_el["text"].strip()
+    if label_el["type"] in ("Table", "TableChunk", "ListItem") or not t or len(t) > 40 or len(t.split()) > 5 or t.endswith("."):
+        return None
+    b = _box(label_el)
+    if b is None:
+        return None
+    x0, top, x1, bottom = b
+    h = max(bottom - top, 4.0)
+    best = None
+    for el in elements:
+        if el is label_el or el["metadata"].get("page_number") != label_el["metadata"].get("page_number"):
+            continue
+        if el["type"] in FURNITURE or el["type"] in ("Table", "TableChunk") or len(el["text"]) > 200:
+            continue
+        bb = _box(el)
+        if bb is None:
+            continue
+        gap = bb[1] - bottom
+        if -1 <= gap <= max(3.0 * h, 18.0) and abs(bb[0] - x0) <= max(6.0, h):
+            if best is None or gap < best[0]:
+                best = (gap, el, bb)
+    if best is None:
+        return None
+    # Only the text directly underneath can be the value. A label is never much larger
+    # than its own value: big text over small text is a value or a name sitting above the
+    # next label, not a pair.
+    _, el, bb = best
+    if (bottom - top) > 1.3 * max(bb[3] - bb[1], 1.0):
+        return None
+    return el
+
+
 def candidates(elements: list[dict]) -> list[dict]:
     """All label/value pairs the document's structure offers."""
     out: list[dict] = []
+    # Label-above-value pairs, top-down: text that is already some label's value cannot
+    # also be a label (otherwise a value would pair with the next label below it).
+    below_of: dict[str, dict] = {}
+    is_value: set[str] = set()
+    ordered = sorted((e for e in elements if _box(e) is not None),
+                     key=lambda e: (e["metadata"].get("page_number") or 0, _box(e)[1], _box(e)[0]))
+    for el in ordered:
+        if el["element_id"] in is_value:
+            continue
+        v = _value_below(el, elements)
+        if v is not None:
+            below_of[el["element_id"]] = v
+            is_value.add(v["element_id"])
     for el in elements:
         if el["type"] in FURNITURE:
             continue
@@ -119,6 +176,9 @@ def candidates(elements: list[dict]) -> list[dict]:
                         if first:
                             out.append({"label": head, "value": first, "el": el, "how": "table column"})
             continue
+        below = below_of.get(el["element_id"])
+        if below is not None and el["element_id"] not in is_value:
+            out.append({"label": el["text"], "value": below["text"], "el": below, "how": "label above value"})
         for part in re.split(r"\s{3,}|\s\|\s|\n", el["text"]):
             m = PAIR_RE.match(part)
             if m and not m.group(1).strip().isdigit():

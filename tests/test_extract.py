@@ -76,3 +76,49 @@ def test_suggest_skips_data_rows_and_types_from_value_start():
     assert "Printer paper" not in by and "Item" not in by
     got = extract(els, [{"name": "Payment terms"}])[0]
     assert got["value"] == "30 days"
+
+
+def _form_pdf(path):
+    """A small fillable form: labels printed on the page, values only in AcroForm fields."""
+    from reportlab.lib.pagesizes import A4
+    from reportlab.pdfgen import canvas
+
+    c = canvas.Canvas(str(path), pagesize=A4)
+    W, H = A4
+    c.setFont("Helvetica-Bold", 7)
+    for x, label in ((57, "Flight"), (214, "Class Of Travel"), (355, "Seat")):
+        c.drawString(x, H - 166, label)
+    for x, label in ((57, "Booking Reference"), (214, "Status")):
+        c.drawString(x, H - 266, label)
+    form = c.acroForm
+    for name, value, x, y in (("flight", "QR 0517", 55, H - 191), ("cabin", "ECONOMY", 212, H - 191), ("seat", "22D", 352, H - 191),
+                              ("ref", "RWF6GP", 55, H - 291), ("status", "Checked In", 212, H - 291)):
+        form.textfield(name=name, value=value, x=x, y=y, width=140, height=22, fontName="Helvetica-Bold", fontSize=12, borderWidth=0)
+    c.drawString(57, H - 340, "Important Information")
+    form.textfield(name="info", value="1. Arrive at least three hours before your flight because there may be delays at the airport.",
+                   x=55, y=H - 420, width=200, height=70, fontName="Helvetica", fontSize=7, borderWidth=0,
+                   fieldFlags="multiline")
+    c.showPage()
+    c.save()
+
+
+def test_form_field_values_are_extracted(tmp_path):
+    import pytest
+
+    pytest.importorskip("reportlab")
+    from app.extract import extract, suggest
+    from docparse import partition
+
+    p = tmp_path / "form.pdf"
+    _form_pdf(p)
+    els = [e.to_dict() for e in partition(filename=str(p))]
+    texts = [e["text"] for e in els]
+    for v in ("QR 0517", "ECONOMY", "22D", "RWF6GP", "Checked In"):
+        assert v in texts, v
+    assert not any(e["type"] == "Title" and e["text"] in ("Flight", "Seat", "QR 0517") for e in els)
+    info = [t for t in texts if t.startswith("1. Arrive")]
+    assert info and info[0].endswith("airport.")  # wrapped field text stays one item
+    got = {r["name"]: r["value"] for r in extract(els, [{"name": "Flight"}, {"name": "Seat"}, {"name": "Booking Reference", "type": "id"}, {"name": "Status"}])}
+    assert got == {"Flight": "QR 0517", "Seat": "22D", "Booking Reference": "RWF6GP", "Status": "Checked In"}
+    names = {f["name"] for f in suggest(els)["fields"]}
+    assert {"Flight", "Seat", "Booking Reference"} <= names and "ECONOMY" not in names
