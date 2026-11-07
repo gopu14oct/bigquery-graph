@@ -136,7 +136,7 @@ with open(out, "w") as f:
 '''
 
 
-def run(out: str, parser: str, python: str, timeout: int, only: list[str] | None) -> None:
+def run(out: str, parser: str, python: str, timeout: int, only: list[str] | None, resume: bool = False) -> None:
     with open(os.path.join(out, "manifest.json")) as f:
         manifest = json.load(f)
     resdir = os.path.join(out, "results", parser)
@@ -146,6 +146,8 @@ def run(out: str, parser: str, python: str, timeout: int, only: list[str] | None
             continue
         path = os.path.join(out, "corpus", name + ".pdf")
         dst = os.path.join(resdir, name + ".json")
+        if resume and os.path.exists(dst):
+            continue
         t0 = time.perf_counter()
         try:
             p = subprocess.run([python, "-c", WORKER, parser, path, info["kind"], dst, os.path.dirname(HERE)],
@@ -237,11 +239,12 @@ def main():
     ap.add_argument("--timeout", type=int, default=1800)
     ap.add_argument("--only", nargs="*")
     ap.add_argument("--md")
+    ap.add_argument("--resume", action="store_true", help="skip documents that already have a result")
     a = ap.parse_args()
     if a.cmd == "build":
         build(a.out)
     elif a.cmd == "run":
-        run(a.out, a.parser, a.python, a.timeout, a.only)
+        run(a.out, a.parser, a.python, a.timeout, a.only, a.resume)
     else:
         report(a.out, ["docparse", "unstructured"], a.md)
 
