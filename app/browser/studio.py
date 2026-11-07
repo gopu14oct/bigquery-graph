@@ -88,3 +88,9 @@ def extract(elements_json: str, fields_json: str) -> str:
     from app.extract import extract as run
 
     return json.dumps(run(json.loads(elements_json), json.loads(fields_json)))
+
+
+def suggest(elements_json: str) -> str:
+    from app.extract import suggest as run
+
+    return json.dumps(run(json.loads(elements_json)))

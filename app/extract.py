@@ -83,6 +83,10 @@ def _fit(value: str, ftype: str) -> Optional[str]:
     if ftype == "id":
         m = ID_RE.search(v)
         return m.group(1) if m and any(c.isdigit() for c in m.group(1)) else None
+    # a text value ends at the end of its first sentence when more text follows ("30 days. Questions? ...")
+    m = re.match(r"(.{2,}?[.!?])\s+[A-Z(\"']", v)
+    if m and len(m.group(1)) >= 3:
+        v = m.group(1).rstrip(".")
     return v if len(v) <= 300 else v[:300] + "…"
 
 
@@ -107,7 +111,7 @@ def candidates(elements: list[dict]) -> list[dict]:
                 cells = [c for c in r if c]
                 if len(cells) >= 2 and not NUMBER_RE.fullmatch(cells[0].replace(" ", "")):
                     # label in the first cell, value in the last non-empty cell (totals rows, 2-col tables)
-                    out.append({"label": cells[0], "value": cells[-1], "el": el, "how": "table row"})
+                    out.append({"label": cells[0], "value": cells[-1], "el": el, "how": "table row", "ncells": len(cells)})
             if width >= 2 and len(grid) >= 2:
                 for c, head in enumerate(grid[0]):
                     if head:
@@ -217,3 +221,102 @@ def extract(elements: list[dict], fields: list[dict]) -> list[dict]:
             continue
         results.append(_result(f, None, None, 0.0, "not found"))
     return results
+
+
+# ---------------------------------------------------------------- field suggestions
+DOC_TYPES = {
+    "invoice": ["invoice", "bill to", "due date", "subtotal", "amount due", "invoice number", "vat", "remit", "payment terms"],
+    "receipt": ["receipt", "thank you for your purchase", "change due", "cash", "card ending", "cashier", "subtotal", "transaction id", "total paid"],
+    "contract": ["agreement", "party", "parties", "hereby", "term", "termination", "governing law", "whereas", "shall", "indemn"],
+    "resume": ["experience", "education", "skills", "curriculum vitae", "resume", "employment", "linkedin", "references"],
+    "paper": ["abstract", "introduction", "related work", "references", "et al", "conclusion", "method", "results", "arxiv"],
+}
+
+
+_STOP = {"in", "on", "at", "to", "of", "and", "or", "the", "a", "an", "for", "by", "with", "from", "is", "as", "see", "note", "e.g", "i.e"}
+_NOT_LABEL_RE = re.compile(r"^(?:https?|ftp|www|mailto|doi|urn)$|^\d|^(?:table|figure|fig|tab|eq|equation|section|chapter|step)\.?\s*\d", re.I)
+
+
+def _clean_label(label: str) -> Optional[str]:
+    lab = " ".join(label.replace("*", "").split()).strip(" -–—#.:;|")
+    if not (3 <= len(lab) <= 40) or len(lab.split()) > 5 or lab.lower() in _STOP or _NOT_LABEL_RE.search(lab):
+        return None
+    if sum(c.isalpha() for c in lab) < 0.6 * len(lab.replace(" ", "")):
+        return None
+    if lab.endswith((".", "?", "!")) or lab[0].islower() and len(lab.split()) > 3:
+        return None
+    return lab[0].upper() + lab[1:]
+
+
+def _infer_type(label: str, value: str) -> str:
+    lab = label.lower()
+    head = value.strip()[:40]  # judge the type from the start of the value, not something said later
+    for t in ("email", "date", "money"):
+        v = _fit(head, t)
+        if v and head.find(v) <= 3 and (t != "money" or MONEY_RE.search(head)):
+            return t
+    if _fit(value, "phone") and re.search(r"phone|tel|mobile|fax|call", lab):
+        return "phone"
+    if re.search(r"\b(no|number|#|id|code|ref|reference|account|po)\b", lab) and _fit(value, "id"):
+        return "id"
+    if NUMBER_RE.fullmatch(value.strip().replace(" ", "")):
+        return "number"
+    return "text"
+
+
+def suggest(elements: list[dict], limit: int = 14) -> dict:
+    """Propose fields for this document from its own structure, plus a document-type guess."""
+    body = [e for e in elements if e["type"] not in FURNITURE]
+    text = " ".join(e["text"] for e in body[:400]).lower()
+    # count distinct keywords present (whole words), not raw frequency: one common word
+    # repeated many times must not decide the type
+    scores = {k: sum(1 for w in ws if re.search(rf"\b{re.escape(w)}\b", text)) for k, ws in DOC_TYPES.items()}
+    doc_type, best = max(scores.items(), key=lambda kv: kv[1]) if scores else (None, 0)
+    runner_up = sorted(scores.values())[-2] if len(scores) > 1 else 0
+    total = sum(scores.values()) or 1
+    if best < 3 or best - runner_up < 2:
+        doc_type, best = None, 0
+    out: dict[str, dict] = {}
+    for c in candidates(body):
+        lab = _clean_label(c["label"])
+        # table columns and full data rows (more than label + value) are not single fields
+        if not lab or c["how"] == "table column" or c.get("ncells", 2) > 2:
+            continue
+        val = " ".join(c["value"].split())
+        if not val or len(val) > 160 or val.startswith("//") or not re.search(r"[A-Za-z0-9]", val):
+            continue
+        key = _norm(lab)
+        if key in out:
+            out[key]["score"] += 1
+            continue
+        ftype = _infer_type(lab, val)
+        # Short values are what fields usually hold; sentence-like values (definition lists, prose
+        # after a colon) are kept but ranked lower.
+        wordy = ftype == "text" and len(val.split()) > 8
+        out[key] = {"name": lab, "type": ftype, "aliases": [], "example": _fit(val, ftype) or val[:60],
+                    "element_id": c["el"]["element_id"], "score": 2 + (ftype != "text") + (c["how"] == "label: value") - 1.5 * wordy,
+                    "why": "labelled in the document"}
+    for i, el in enumerate(e for e in body if e["type"] in ("Table", "TableChunk")):
+        grid = [r for r in _grid(el) if any(r)]
+        if len(grid) >= 3 and max(len(r) for r in grid) >= 3:
+            heads = [h for h in grid[0] if h]
+            name = f"Table {i + 1}" if not heads else (heads[0] if len(heads) == 1 else f"{heads[0]} table")
+            key = _norm(name) + "#table"
+            out.setdefault(key, {"name": name, "type": "list", "aliases": heads[:3], "example": " | ".join(heads[:4]),
+                                 "element_id": el["element_id"], "score": 2 + min(len(grid), 10) / 5, "why": f"table with {len(grid) - 1} rows"})
+    have = {f["type"] for f in out.values()}
+    for ftype, name in (("email", "Email"), ("phone", "Phone")):
+        if ftype in have:
+            continue
+        for el in body:
+            v = _fit(el["text"], ftype)
+            # an unlabelled number only counts as a phone if it is written like one
+            if v and ftype == "phone" and not re.search(r"^\+|[()\s-]", v.strip()):
+                v = None
+            if v:
+                out[_norm(name)] = {"name": name, "type": ftype, "aliases": [], "example": v, "element_id": el["element_id"],
+                                    "score": 1.5, "why": f"{name.lower()} found in the text"}
+                break
+    fields = sorted(out.values(), key=lambda f: -f["score"])[:limit]
+    return {"doc_type": doc_type, "doc_type_confidence": round(best / total, 2) if doc_type else 0.0,
+            "fields": fields}

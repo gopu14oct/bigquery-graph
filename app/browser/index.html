@@ -253,6 +253,15 @@ input[type=range] { width: 100%; accent-color: var(--accent); }
 .batch-table td, .batch-table th { border: 1px solid var(--border); padding: 6px 9px; text-align: left; vertical-align: top; white-space: nowrap; }
 .batch-table th { background: var(--surface-2); position: sticky; top: 0; }
 .batch-table td.low { color: var(--warn); }
+.sug { display: grid; gap: 10px; margin-bottom: 12px; border-color: color-mix(in srgb, var(--accent) 35%, var(--border)); }
+.sug-head { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.sug-head b { font-size: 15px; }
+.sug-chips { display: flex; gap: 6px; flex-wrap: wrap; }
+.sug-chip { display: inline-flex; flex-direction: column; align-items: flex-start; gap: 1px; text-align: left; padding: 6px 11px; border-radius: 12px; border: 1px dashed color-mix(in srgb, var(--accent) 55%, var(--border)); background: var(--surface); cursor: pointer; max-width: 100%; }
+.sug-chip .n { font-weight: 600; font-size: 13.5px; }
+.sug-chip .e { font-size: 11.5px; color: var(--muted); font-family: var(--mono); max-width: 26ch; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.sug-chip.added { border-style: solid; border-color: var(--pass); opacity: .75; cursor: default; }
+.sug-chip.ai .n::after { content: " ✦"; color: var(--accent); }
 @media (prefers-reduced-motion: reduce) { *, *::before { animation: none !important; transition: none !important; } }
 </style>
 
@@ -360,6 +369,7 @@ const engine = (() => {
     chunks: (elements, params) => call({ cmd: "chunks", elements, params }),
     export: (elements, fmt, reviews, filename) => call({ cmd: "export", elements, fmt, reviews, filename }),
     extract: (elements, fields) => call({ cmd: "extract", elements, fields }),
+    suggest: (elements) => call({ cmd: "suggest", elements }),
   };
 })();
 let engineMsg = "Starting the parser…";
@@ -798,7 +808,47 @@ function viewExtract() {
   const out = h(`<div class="results"></div>`);
   const tools = h(`<div class="btn-row" hidden id="xTools"><button class="btn small" id="xCsv">Download CSV</button><button class="btn small" id="xJson">Download JSON</button><button class="btn small" id="xCopy">Copy JSON</button><button class="btn small" id="xBatch">Run on all documents</button></div>`);
   const batch = h(`<div id="batchOut"></div>`);
-  main.append(intro, tpls, ed, run, tools, out, batch);
+  const sug = h(`<div class="card sug"><div class="sug-head"><b>Suggested for this document</b><span id="docType"></span></div>
+    <div class="sug-chips" id="sugChips"><span class="muted" style="font-size:13px">Looking at the document…</span></div>
+    <div class="btn-row" style="margin:0"><button class="btn small" id="sugAll" hidden>Add all suggestions</button>${caps.sample ? '<button class="btn small" id="sugAI">Ask Claude for ideas</button>' : ""}<span class="muted" id="sugMsg" style="font-size:13px;align-self:center"></span></div></div>`);
+  main.append(intro, sug, tpls, ed, run, tools, out, batch);
+  drawSuggestions();
+  if (!X.suggestions) engine.suggest(JSON.stringify(els())).then((r) => { X.suggestions = JSON.parse(r); saveDoc(); drawSuggestions(); }).catch((e) => { $("#sugChips").textContent = e.message; });
+  if (caps.sample) $("#sugAI").onclick = async () => {
+    const b = $("#sugAI"); b.disabled = true; $("#sugMsg").textContent = "Claude is reading the document…";
+    try { X.aiSuggestions = await suggestWithClaude(els()); await saveDoc(); drawSuggestions(); $("#sugMsg").textContent = ""; }
+    catch (e) { $("#sugMsg").textContent = sampleErr(e); }
+    finally { b.disabled = false; }
+  };
+  function drawSuggestions() {
+    if (!X.suggestions && !X.aiSuggestions) return;
+    const have = new Set(X.fields.map((f) => normTxt(f.name)));
+    const list = [...(X.aiSuggestions?.fields || []).map((f) => ({ ...f, ai: true })), ...(X.suggestions?.fields || [])]
+      .filter((f, i, a) => f.name && a.findIndex((g) => normTxt(g.name) === normTxt(f.name)) === i);
+    const dt = X.aiSuggestions?.doc_type || X.suggestions?.doc_type;
+    const tplKey = { invoice: "invoice", receipt: "receipt", contract: "contract", resume: "resume", paper: "paper" }[X.suggestions?.doc_type];
+    $("#docType").innerHTML = dt ? `<span class="pill ai">looks like: ${esc(dt)}</span>` + (tplKey && X.template !== tplKey ? ` <button class="btn small" id="useTpl">Use ${esc(TEMPLATES[tplKey].label)} template</button>` : "") : "";
+    $("#useTpl")?.addEventListener("click", () => { X.template = tplKey; X.fields = structuredClone(TEMPLATES[tplKey].fields); X.results = null; saveDoc(); rerender(); });
+    const box = $("#sugChips");
+    if (!list.length) { box.innerHTML = `<span class="muted" style="font-size:13px">No labelled fields found.${caps.sample ? " Ask Claude for ideas." : " Add your own below."}</span>`; return; }
+    box.replaceChildren(...list.map((f) => {
+      const added = have.has(normTxt(f.name));
+      const tlabel = FTYPES.find((t) => t[0] === f.type)?.[1] || "Text";
+      const ex = f.example ? (typeof f.example === "string" ? f.example : JSON.stringify(f.example)) : (f.why || tlabel);
+      const c = h(`<button class="sug-chip${added ? " added" : ""}${f.ai ? " ai" : ""}" title="${esc(f.why || "")}" ${added ? "disabled" : ""}><span class="n">${added ? "✓ " : "+ "}${esc(f.name)}</span><span class="e">${esc(tlabel)} · ${esc(ex)}</span></button>`);
+      if (!added) c.onclick = () => addSuggested([f]);
+      return c;
+    }));
+    const missing = list.filter((f) => !have.has(normTxt(f.name)));
+    $("#sugAll").hidden = !missing.length;
+    $("#sugAll").onclick = () => addSuggested(missing);
+  }
+  function addSuggested(fs) {
+    if (X.template !== "custom" && !X.template.startsWith("my:")) X.template = "custom";
+    X.fields = X.fields.filter((f) => f.name);
+    fs.forEach((f) => X.fields.push({ name: f.name, type: FTYPES.some((t) => t[0] === f.type) ? f.type : "text", aliases: Array.isArray(f.aliases) ? f.aliases : [] }));
+    X.results = null; saveDoc(); rerender(); toast(fs.length === 1 ? `Added “${fs[0].name}”` : `Added ${fs.length} fields`);
+  }
 
   const fields = () => X.fields.filter((f) => f.name);
   $("#runQuick").onclick = async () => {
@@ -933,6 +983,24 @@ ${text}`;
       snippet: el ? (g.quote || el.text).slice(0, 220) : null, verified: isList ? !!el : verified, confidence: g.confidence || null, engine: "claude",
       note: value != null && !verified && !isList ? "Claude's quote wasn't found in the document. Check this value against the source." : excerpt && value == null ? "Long document: only the most relevant parts were sent, so this may be missed." : null };
   });
+}
+async function suggestWithClaude(all) {
+  const { text } = promptElements(all, [], 24000);
+  const prompt = `Here is the start of a parsed document as numbered elements: [number] (element type, page) text. Tables are rows separated by " // " and cells by " | ".
+
+Say what kind of document it is, and suggest up to 12 fields that someone would most likely want to extract from it into a spreadsheet: the key facts, names, dates, amounts, identifiers and terms specific to this document. Prefer fields whose values actually appear in the text. Use short field names (2-4 words).
+
+Field types: "text", "money", "date", "number", "id", "email", "phone", or "list" (a table or repeated items).
+
+Reply with only JSON in this shape:
+{"doc_type":"<2-4 word description>","fields":[{"name":"<field name>","type":"<type>","why":"<under 10 words>","example":"<value as written in the document, or null>"}]}
+
+Document:
+${text}`;
+  const data = await caps.sample.json(prompt, { modelTier: "default" });
+  const fields = (Array.isArray(data?.fields) ? data.fields : []).filter((f) => f && typeof f.name === "string" && f.name.trim()).slice(0, 12)
+    .map((f) => ({ name: f.name.trim().slice(0, 40), type: FTYPES.some((t) => t[0] === f.type) ? f.type : "text", why: String(f.why || "").slice(0, 80), example: f.example ?? null, aliases: [] }));
+  return { doc_type: typeof data?.doc_type === "string" ? data.doc_type.slice(0, 40) : null, fields };
 }
 async function runBatch(engineName) {
   const X = doc.extraction, fields = X.fields.filter((f) => f.name);
