@@ -28,6 +28,7 @@ Per-format tables are in [`RESULTS_test.md`](RESULTS_test.md).
 3. **unstructured's paid API and platform were not tested.**
 4. Unstructured was run with the best strategy available offline: `fast` for born-digital PDFs and `ocr_only` for scans. That is what `strategy="auto"` picks when `hi_res` is unavailable. Everything else ran with defaults and `languages=["eng"]`.
 5. Timings come from a shared cloud container (single run, after a warm-up). Treat them as relative, not absolute.
+6. The OCR ruling-line erasure was added after the first test-set run, prompted by a failing unit test, not by test-set documents. The test set was re-scored with the final code, and the numbers above are from that run.
 
 ## Method
 
