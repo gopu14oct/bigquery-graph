@@ -1,0 +1,7 @@
+app_data/
+__pycache__/
+*.egg-info/
+.pytest_cache/
+.git/
+benchmarks/
+tests/

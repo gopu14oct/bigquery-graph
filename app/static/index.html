@@ -1,0 +1,73 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#0f1115" media="(prefers-color-scheme: dark)">
+<meta name="theme-color" content="#f6f7f9" media="(prefers-color-scheme: light)">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="description" content="Parse, inspect and validate documents with docparse.">
+<title>docparse Studio</title>
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" href="icon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="icon-192.png">
+<link rel="stylesheet" href="styles.css">
+</head>
+<body>
+<header class="topbar">
+  <button class="icon-btn" id="backBtn" aria-label="Back" hidden>
+    <svg viewBox="0 0 24 24"><path d="M15 18l-6-6 6-6"/></svg>
+  </button>
+  <div class="brand" id="brand">
+    <img src="icon.svg" alt="" width="26" height="26">
+    <span>docparse <b>Studio</b></span>
+  </div>
+  <div class="doc-title" id="docTitle" hidden></div>
+  <button class="icon-btn" id="themeBtn" aria-label="Toggle theme">
+    <svg viewBox="0 0 24 24"><path d="M21 12.8A9 9 0 1111.2 3a7 7 0 009.8 9.8z"/></svg>
+  </button>
+</header>
+
+<main id="main"></main>
+
+<nav class="tabbar" id="tabbar" hidden></nav>
+<div class="sheet-backdrop" id="sheetBackdrop" hidden></div>
+<section class="sheet" id="sheet" role="dialog" aria-modal="true" hidden>
+  <div class="sheet-handle"></div>
+  <div class="sheet-body" id="sheetBody"></div>
+</section>
+<div class="toast" id="toast" role="status" aria-live="polite"></div>
+
+<template id="tpl-home">
+  <section class="hero">
+    <h1>Parse any document.<br><span class="grad">See exactly what came out.</span></h1>
+    <p class="muted">PDF, Word, PowerPoint, Excel, HTML, Markdown, e-mail, EPUB, CSV, or a photo of a page.</p>
+  </section>
+  <section class="card upload" id="drop">
+    <input type="file" id="fileInput" hidden accept=".pdf,.docx,.pptx,.xlsx,.html,.htm,.md,.markdown,.txt,.eml,.epub,.csv,.tsv,.xml,.json,image/*">
+    <input type="file" id="cameraInput" hidden accept="image/*" capture="environment">
+    <div class="upload-icon"><svg viewBox="0 0 24 24"><path d="M12 16V4m0 0l-4 4m4-4l4 4M4 16v3a1 1 0 001 1h14a1 1 0 001-1v-3"/></svg></div>
+    <div class="upload-actions">
+      <button class="btn primary" id="pickBtn">Choose file</button>
+      <button class="btn" id="camBtn"><svg viewBox="0 0 24 24"><path d="M4 8h3l2-3h6l2 3h3v11H4z"/><circle cx="12" cy="13" r="3.5"/></svg>Scan with camera</button>
+    </div>
+    <p class="hint">or drop a file here</p>
+    <details class="options">
+      <summary>Parsing options</summary>
+      <label class="row">OCR
+        <select id="optOcr"><option value="auto">Auto (image-only pages)</option><option value="always">Always</option><option value="never">Never</option></select>
+      </label>
+      <label class="row">Detect tables <input type="checkbox" id="optTables" checked></label>
+      <label class="row">Languages <input type="text" id="optLang" placeholder="e.g. eng, deu"></label>
+    </details>
+  </section>
+  <section>
+    <div class="section-head"><h2>Recent</h2><span class="muted" id="recentCount"></span></div>
+    <div id="recent" class="recent"></div>
+  </section>
+</template>
+
+<script src="app.js" type="module"></script>
+</body>
+</html>

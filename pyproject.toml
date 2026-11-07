@@ -15,13 +15,14 @@ dependencies = []
 pdf = ["pdfplumber>=0.10"]
 pandas = ["pandas"]
 bigquery = ["google-cloud-bigquery>=3"]
-test = ["pytest", "pdfplumber", "reportlab", "python-docx", "python-pptx", "openpyxl"]
+app = ["fastapi>=0.110", "uvicorn[standard]>=0.29", "python-multipart>=0.0.9", "pypdfium2>=4", "pdfplumber>=0.10", "rapidfuzz>=3", "pillow>=10"]
+test = ["pytest", "httpx", "fastapi", "python-multipart", "pypdfium2", "pdfplumber", "reportlab", "python-docx", "python-pptx", "openpyxl"]
 
 [project.scripts]
 docparse = "docparse.cli:main"
 
 [tool.setuptools.packages.find]
-include = ["docparse*"]
+include = ["docparse*", "app*"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
